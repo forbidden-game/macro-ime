@@ -121,7 +121,10 @@ omarime/
 
 ## 4. The data/LM pipeline (the actual "REALLY GOOD" work)
 
-Corpora candidates (all to be license-audited in Phase 2):
+Corpus landscape audited (details in docs/research/lm-training-feasibility.md):
+CLUECorpus2020 100GB, WuDao 200GB, THUCNews 740k news, SogouCA, zhwiki,
+OPUS OpenSubtitles (colloquial — weighted up), ChineseWebText 2.0.
+Key technical constraint: LM tokenization must align with dictionary vocabulary.
 - zhwiki + wiktionary titles (CC BY-SA) — entity coverage
 - THUCNews / People's Daily 1998 (research licenses) — clean formal text
 - OpenSubtitles zh — colloquial sentence flow (what Gboard-style IMEs weight heavily)
@@ -187,8 +190,8 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 
 | Risk | Mitigation |
 |---|---|
-| kenlm trigram still < Gboard quality | Gboard's edge is data volume + neural; we close the gap iteratively (Phase 6). Even a fresh 2020s trigram beats a 2008 one massively. |
-| libime LM format constraints (trie SLM, quantized probs) | Validate `libime_slm_build_binary` round-trip early in Phase 2; keep ARPA source of truth |
+| kenlm trigram still < Gboard quality | Gboard's edge is data volume + neural; we close the gap iteratively (Phase 6). Stock LM autopsy: only 2.2M trigrams (188MB ARPA) — a 20-100x modern corpus is a likely win, not a bet. See docs/research/lm-training-feasibility.md |
+| ~~libime LM format~~ **RESOLVED**: libime embeds kenlm; official pipeline = ARPA → `slm_build_binary -q 4 trie`. Our training path is identical to upstream's. |
 | User-model behavior unclear/buggy | Phase 0/2 verification tasks; worst case implement our own adaptation layer via own addon (v2) |
 | Corpora licenses | Audit before shipping; prefer CC BY-SA / research-permitted; never ship scraped-proprietary text |
 | kimpanel positioning on Hyprland | Spike first (Phase 4), classicui theme remains shipping fallback |
@@ -212,6 +215,8 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 - https://github.com/fcitx/fcitx5 — frontend/DBus (verified live introspection)
 
 **LM training**
+- docs/research/lm-training-feasibility.md — full feasibility study (stock LM autopsy,
+  corpus landscape, pipeline, compute budget)
 - https://github.com/kpu/kenlm — trigram training
 - 墨奇科技 blog: "每个人都可以训练自己的语言模型" (corpus→segment→train recipe)
 - https://zhuanlan.zhihu.com/p/710756084 — rime grammar LM training (concept parity)
