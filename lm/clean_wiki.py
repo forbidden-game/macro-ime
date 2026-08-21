@@ -24,7 +24,8 @@ def clean_line(line):
     out = []
     for sent in SENT_SPLIT.split(s):
         sent = sent.strip()
-        if 2 <= len(sent) <= 100:
+        # 最短 4 字: 避免数字剥离后残留 "年是了" 类碎片
+        if 4 <= len(sent) <= 100:
             out.append(sent)
     return out
 

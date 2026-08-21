@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
         // 首选完整句
         got = ctx.sentence();
         if (got.empty() && !ctx.candidates().empty()) {
-            got = ctx.candidates()[0];
+            got = ctx.candidates()[0].toString();
         }
 
         ++total;
