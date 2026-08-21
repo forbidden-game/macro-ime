@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- omarime panel: background fill + accent hairline, mirrors omarchy popup recipe -->
+  <rect x="@HALF_BW@" y="@HALF_BW@" width="@INNER@" height="@INNER@" rx="@RADIUS@" ry="@RADIUS@" fill="@PANEL_BG@" stroke="@BORDER@" stroke-width="@BORDER_WIDTH@"/>
+</svg>

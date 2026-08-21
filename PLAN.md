@@ -164,7 +164,11 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 - [ ] Exit: eval harness shows ≥ stock by a wide margin; blind test preferred
 
 ### Phase 3 — Beauty + indicator (2–3 days)
-- [ ] classicui theme generated from active Omarchy theme + `theme-set` hook
+- [x] classicui theme generated from active Omarchy theme + `theme-set` hook
+      (themes/omarime-theme: palette from colors.toml, radius from hyprctl,
+      font from fc-match; recipe = omarchy popup: bg fill + accent border;
+      preedit in panel via PreeditEnabledByDefault=False; verified on
+      retro-82 dark + catppuccin-latte light, horizontal + vertical)
 - [ ] `omarime.indicator` bar widget (中/EN, click-toggle, schema tooltip)
 - [ ] Optional OSD toast on switch
 

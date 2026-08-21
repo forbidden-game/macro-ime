@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+# omarime-theme — generate an fcitx5 classicui theme from an Omarchy palette.
+#
+# Reads the live sources of desktop truth and bakes them into a self-contained
+# theme at ~/.local/share/fcitx5/themes/omarime/:
+#
+#   palette  ~/.local/state/omarchy/current/theme/colors.toml
+#   radius   hyprctl getoption decoration:rounding   (sharp desktops stay sharp)
+#   font     fc-match monospace                      (same face as bar/menus)
+#
+# The visual recipe mirrors omarchy-shell popups exactly:
+#   surface = background token · border = accent token · text = foreground token
+#   selection = accent fill @ selected-fill alpha · labels/comments dimmed
+#
+# Usage:
+#   omarime-theme                     regenerate from current theme + apply
+#   omarime-theme --theme gruvbox     generate from a named Omarchy theme
+#   omarime-theme --dry-run           print what would be generated
+#
+# Flags:
+#   --theme NAME        source Omarchy theme (default: current)
+#   --out DIR           output theme dir (default ~/.local/share/fcitx5/themes/omarime)
+#   --radius N          override corner radius (default: hyprctl decoration:rounding)
+#   --font FAMILY       override font family (default: fc-match monospace)
+#   --size PT           font size in points (default: 13)
+#   --border-width N    panel accent border width (default: 2, omarchy popup spec)
+#   --pill-alpha N      selected-candidate pill opacity % (default: 18)
+#   --label-alpha N     candidate number label opacity % (default: 55)
+#   --dim-alpha N       page arrows / menu glyphs opacity % (default: 50)
+#   --sep-alpha N       menu separator opacity % (default: 25)
+#   --selected MODE     selected text color: bright | accent | plain (default: bright)
+#   --vertical          also set Vertical Candidate List=True in classicui.conf
+#   --size-factor N     LabelTextSizeFactor (default: 85)
+#   --no-ui-conf        don't touch classicui.conf
+#   --reload MODE       auto | reload | restart | none  (default: auto)
+#   --quiet             suppress progress output
+#   --dry-run           print plan, write nothing
+
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE_DIR="$SELF_DIR/template"
+
+OUT="${HOME}/.local/share/fcitx5/themes/omarime"
+THEME_ARG="" RADIUS="" FONT_FAMILY="" FONT_SIZE=13 BORDER_WIDTH=2
+PILL_ALPHA=30 LABEL_ALPHA=55 DIM_ALPHA=50 SEP_ALPHA=25 SELECTED="bright"
+SIZE_FACTOR=85 VERTICAL="" NO_UI_CONF="" RELOAD="auto" QUIET="" DRY_RUN=""
+
+die() { echo "omarime-theme: $*" >&2; exit 1; }
+msg() { [[ -n $QUIET ]] || echo "omarime-theme: $*" >&2; }
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --theme) THEME_ARG=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;;
+    --radius) RADIUS=$2; shift 2 ;;
+    --font) FONT_FAMILY=$2; shift 2 ;;
+    --size) FONT_SIZE=$2; shift 2 ;;
+    --border-width) BORDER_WIDTH=$2; shift 2 ;;
+    --pill-alpha) PILL_ALPHA=$2; shift 2 ;;
+    --label-alpha) LABEL_ALPHA=$2; shift 2 ;;
+    --dim-alpha) DIM_ALPHA=$2; shift 2 ;;
+    --sep-alpha) SEP_ALPHA=$2; shift 2 ;;
+    --selected) SELECTED=$2; shift 2 ;;
+    --size-factor) SIZE_FACTOR=$2; shift 2 ;;
+    --vertical) VERTICAL=1; shift ;;
+    --no-ui-conf) NO_UI_CONF=1; shift ;;
+    --reload) RELOAD=$2; shift 2 ;;
+    --quiet|-q) QUIET=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    *) die "unknown flag: $1 (see header for usage)" ;;
+  esac
+done
+
+# ---------------------------------------------------------------- theme input
+STATE_DIR="${HOME}/.local/state/omarchy/current"
+if [[ -z $THEME_ARG ]]; then
+  THEME_DIR="$(readlink -f "$STATE_DIR/theme" 2>/dev/null || echo "$STATE_DIR/theme")"
+  ACTIVE_NAME="$(cat "$STATE_DIR/theme.name" 2>/dev/null || basename "$THEME_DIR")"
+else
+  THEME_DIR=""
+  for base in "${HOME}/.config/omarchy/themes" "${OMARCHY_PATH:-/usr/share/omarchy}/themes"; do
+    [[ -f "$base/$THEME_ARG/colors.toml" ]] && { THEME_DIR="$base/$THEME_ARG"; break; }
+  done
+  [[ -n $THEME_DIR ]] || die "theme '$THEME_ARG' not found in ~/.config/omarchy/themes or \$OMARCHY_PATH/themes"
+  ACTIVE_NAME=$THEME_ARG
+fi
+COLORS="$THEME_DIR/colors.toml"
+[[ -f $COLORS ]] || die "no colors.toml under $THEME_DIR"
+
+tok() { sed -n "s/^$1[[:space:]]*=[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$COLORS" | tail -1; }
+
+MODE=$(tok mode)
+ACCENT=$(tok accent)
+BACKGROUND=$(tok background)
+FOREGROUND=$(tok foreground)
+BRIGHT_FG=$(tok bright_foreground)
+[[ -n $MODE ]] || MODE=dark
+[[ -n $ACCENT ]] || die "colors.toml missing 'accent'"
+[[ -n $BACKGROUND ]] || die "colors.toml missing 'background'"
+[[ -n $FOREGROUND ]] || die "colors.toml missing 'foreground'"
+[[ -n $BRIGHT_FG ]] || BRIGHT_FG=$FOREGROUND
+
+# ------------------------------------------------------------------ geometry
+clamp() { local n=$1 lo=$2 hi=$3; (( n < lo )) && n=$lo; (( n > hi )) && n=$hi; echo "$n"; }
+hexalpha() { printf '%02X' $(( $1 * 255 / 100 )); }
+
+if [[ -z $RADIUS ]]; then
+  RADIUS=$(hyprctl -j getoption decoration:rounding 2>/dev/null | jq -r '.int // 0' 2>/dev/null || echo 0)
+fi
+RADIUS=$(clamp "$RADIUS" 0 28)
+
+PANEL_MARGIN=$(( RADIUS + BORDER_WIDTH / 2 + 4 ))
+PILL_RADIUS=$(( RADIUS > 12 ? 12 : RADIUS ))
+
+# ---------------------------------------------------------------------- font
+if [[ -z $FONT_FAMILY ]]; then
+  FONT_FAMILY=$(fc-match -f '%{family[0]}' monospace 2>/dev/null || echo sans-serif)
+fi
+
+# -------------------------------------------------------------------- colors
+case $SELECTED in
+  bright) SELECTED_TEXT=$BRIGHT_FG ;;
+  accent) SELECTED_TEXT=$ACCENT ;;
+  plain)  SELECTED_TEXT=$FOREGROUND ;;
+  *) die "--selected must be bright|accent|plain" ;;
+esac
+
+TEXT_ALPHA_HEX=$(hexalpha 100)   # preedit/candidate base text: full foreground
+LABEL_HEX=$(hexalpha "$LABEL_ALPHA")
+DIM_HEX=$(hexalpha "$DIM_ALPHA")
+SEP_HEX=$(hexalpha "$SEP_ALPHA")
+PILL_HEX=$(hexalpha "$PILL_ALPHA")
+
+render() { # render <src> <dst> [key=value ...]
+  local src=$1 dst=$2 content kv
+  content=$(<"$src")
+  shift 2
+  for kv in "$@"; do content=${content//"${kv%%=*}"/"${kv#*=}"}; done
+  if [[ -n $DRY_RUN ]]; then
+    msg "write $(realpath --relative-to="$OUT" "$dst" 2>/dev/null || echo "$dst") ($(wc -c <<<"$content") bytes)" 
+  else
+    mkdir -p "$(dirname "$dst")"
+    printf '%s\n' "$content" >"$dst"
+  fi
+}
+
+COMMON=( \
+  "@ACTIVE_NAME@=$ACTIVE_NAME" "@MODE@=$MODE" "@FONT_FAMILY@=$FONT_FAMILY" \
+  "@RADIUS@=$RADIUS" "@PANEL_MARGIN@=$PANEL_MARGIN" "@SIZE_FACTOR@=$SIZE_FACTOR" \
+  "@TEXT@=$FOREGROUND" "@TEXT_ALPHA@=$TEXT_ALPHA_HEX" "@ACCENT@=$ACCENT" \
+  "@SELECTED_TEXT@=$SELECTED_TEXT" "@LABEL@=$FOREGROUND$LABEL_HEX" \
+  "@SELECTED_LABEL@=$SELECTED_TEXT" "@SEPARATOR_ALPHA@=$SEP_HEX" )
+
+SVG_COMMON=( "@RADIUS@=$RADIUS" "@PILL_RADIUS@=$PILL_RADIUS" "@BORDER_WIDTH@=$BORDER_WIDTH" \
+  "@HALF_BW@=$(( BORDER_WIDTH / 2 ))" "@INNER@=$(( 64 - BORDER_WIDTH ))" \
+  "@PANEL_BG@=$BACKGROUND" "@BORDER@=$ACCENT" \
+  "@PILL_FILL@=$ACCENT" "@PILL_OPACITY@=$(awk "BEGIN{print $PILL_ALPHA/100}")" \
+  "@DIM@=$FOREGROUND$DIM_HEX" )
+
+msg "palette : $ACTIVE_NAME ($MODE)  accent=$ACCENT bg=$BACKGROUND fg=$FOREGROUND"
+msg "geometry: radius=$RADIUS panel_margin=$PANEL_MARGIN pill_radius=$PILL_RADIUS border=${BORDER_WIDTH}px"
+msg "font    : $FONT_FAMILY $FONT_SIZE"
+
+if [[ -n $DRY_RUN ]]; then
+  render "$TEMPLATE_DIR/theme.conf.in" "/dev/null" "${COMMON[@]}"
+  exit 0
+fi
+
+mkdir -p "$OUT"
+render "$TEMPLATE_DIR/theme.conf.in" "$OUT/theme.conf" "${COMMON[@]}"
+render "$TEMPLATE_DIR/panel.svg.in" "$OUT/panel.svg" "${SVG_COMMON[@]}"
+render "$TEMPLATE_DIR/highlight.svg.in" "$OUT/highlight.svg" "${SVG_COMMON[@]}"
+render "$TEMPLATE_DIR/prev.svg.in" "$OUT/prev.svg" "${SVG_COMMON[@]}"
+render "$TEMPLATE_DIR/next.svg.in" "$OUT/next.svg" "${SVG_COMMON[@]}"
+render "$TEMPLATE_DIR/radio.svg.in" "$OUT/radio.svg" "${SVG_COMMON[@]}"
+render "$TEMPLATE_DIR/arrow.svg.in" "$OUT/arrow.svg" "${SVG_COMMON[@]}"
+
+cat >"$OUT/generated.conf" <<EOF
+# provenance — consumed by omarime-theme on regeneration audits
+active_theme=$ACTIVE_NAME
+mode=$MODE
+radius=$RADIUS
+font=$FONT_FAMILY
+size=$FONT_SIZE
+generated=$(date +%s)
+EOF
+msg "wrote $OUT"
+
+# --------------------------------------------------- classicui.conf plumbing
+UI_CONF="${HOME}/.config/fcitx5/conf/classicui.conf"
+[[ -n $NO_UI_CONF ]] && exit 0
+
+current_theme=""
+[[ -f $UI_CONF ]] && current_theme=$(sed -n 's/^Theme=//p' "$UI_CONF" | tail -1)
+
+make_font_desc() { echo "$FONT_FAMILY ${1:+$1 }$FONT_SIZE"; }
+TRAY_FONT_DESC="$FONT_FAMILY Bold $FONT_SIZE"
+
+conf_wants() { # does the conf file already carry every value we want?
+  local want_v; [[ -n $VERTICAL ]] && want_v=True || want_v=False
+  [[ -f $UI_CONF ]] || return 1
+  grep -q "^Theme=omarime$" "$UI_CONF" || return 1
+  grep -q "^DarkTheme=omarime$" "$UI_CONF" || return 1
+  grep -q "^UseDarkTheme=False$" "$UI_CONF" || return 1
+  grep -q "^Font=$(make_font_desc "")$" "$UI_CONF" || return 1
+  grep -q "^TrayOutlineColor=$BACKGROUND$" "$UI_CONF" || return 1
+  grep -qi "^Vertical Candidate List=$want_v$" "$UI_CONF" || return 1
+  return 0
+}
+
+svc_active() { systemctl --user is-active --quiet omarchy-fcitx5.service; }
+
+apply_ui_conf() {
+  local tmp keys key val
+  keys=(
+    "Theme=omarime"
+    "DarkTheme=omarime"
+    "UseDarkTheme=False"
+    "Font=$(make_font_desc "")"
+    "MenuFont=$(make_font_desc "")"
+    "TrayFont=$TRAY_FONT_DESC"
+    "TrayOutlineColor=$BACKGROUND"
+    "TrayTextColor=$FOREGROUND"
+  )
+  [[ -n $VERTICAL ]] && v=True || v=False
+  keys+=("Vertical Candidate List=$v")
+  tmp=$(mktemp)
+  cp "$UI_CONF" "$tmp" 2>/dev/null || : >"$tmp"
+  for kv in "${keys[@]}"; do
+    key=${kv%%=*}
+    val=${kv#*=}
+    if grep -q "^$key=" "$tmp"; then
+      sed -i "s|^$key=.*|$key=$val|" "$tmp"
+    else
+      printf '%s=%s\n' "$key" "$val" >>"$tmp"
+    fi
+  done
+  mkdir -p "$(dirname "$UI_CONF")"
+  mv "$tmp" "$UI_CONF"
+}
+
+if conf_wants; then
+  msg "classicui.conf already correct"
+elif [[ -n $DRY_RUN ]]; then
+  :
+else
+  # ⚠ fcitx5 writes its in-memory config back on exit: stop → edit → start.
+  if svc_active && [[ $RELOAD != none ]]; then
+    msg "switching Theme '$current_theme' → omarime (service restart to avoid config write-back)"
+    systemctl --user stop omarchy-fcitx5.service
+    apply_ui_conf
+    systemctl --user start omarchy-fcitx5.service
+  else
+    apply_ui_conf
+    msg "updated $UI_CONF (service not running or --reload none)"
+  fi
+fi
+
+# ------------------------------------------------------------------- reload
+if [[ $RELOAD == none || -n $DRY_RUN ]]; then
+  exit 0
+fi
+if svc_active; then
+  case $RELOAD in
+    reload) fcitx5-remote -r >/dev/null 2>&1 || true ; msg "reloaded fcitx5 config" ;;
+    restart) systemctl --user restart omarchy-fcitx5.service ; msg "restarted fcitx5" ;;
+    auto|reload)
+      # classicui caches assets by theme name: a config reload does NOT re-read
+      # regenerated SVG/theme.conf. A service restart is ~200ms and fully safe.
+      if svc_active && grep -q "^Theme=omarime$" "$UI_CONF" 2>/dev/null; then
+        systemctl --user restart omarchy-fcitx5.service
+        msg "restarted fcitx5 to load fresh theme assets"
+      elif [[ $RELOAD == reload ]]; then
+        fcitx5-remote -r >/dev/null 2>&1 || true ; msg "reloaded fcitx5 config"
+      fi
+      ;;
+  esac
+fi
