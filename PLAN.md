@@ -69,10 +69,14 @@ a beautiful native UI.**
 | Indicator/toggle | bar-widget + `Super+Space` → `fcitx5-remote -t` + per-program memory (`ShareInputState=PerProgram`) | trivial, high value | — |
 | Packaging | install.sh (idempotent, backup-first) + AUR where possible | out-of-box | — |
 
-**v2 research track (post-1.0):** neural rescoring — small transformer/GRU LM
-(10–30M params, int8, CPU-realtime) shallow-fused into the beam; either patch
-libime's scoring hook or fork decoder into `omarime-engine` (Rust). Also
-evaluate mozc's recent neural work as architectural reference.
+**v2 research track (post-1.0):** neural rescoring — small transformer LM
+(6-layer class, int8, CPU-realtime) shallow-fused into the beam; either patch
+libime's scoring hook or fork decoder into `omarime-engine` (Rust).
+Paper-informed targets (see docs/research/gboard-research.md): Google IME
+scores P@1=70.9 on the PD benchmark; PinyinGPT (beam=16) reaches 73.15 with a
+pinyin-constrained vocabulary — the key trick for abbreviated-pinyin input.
+Also evaluate mozc's recent neural work as architectural reference.
+Gboard black-box research program: docs/research/gboard-research.md.
 
 ## 3. Architecture
 
@@ -97,6 +101,7 @@ Repo layout:
 omarime/
 ├── PLAN.md, README.md
 ├── docs/                     # research, architecture, eval methodology
+│   └── research/gboard-research.md  # Gboard black-box program + benchmarks
 ├── data/
 │   ├── corpora/README.md     # sources, licenses, prep scripts
 │   ├── dicts/                # curated dict sources + merge rules
@@ -110,6 +115,7 @@ omarime/
 │   ├── omarime.indicator/    # bar-widget 中/EN (Phase 3)
 │   └── omarime.candidate/    # kimpanel Quickshell overlay (Phase 4)
 ├── themes/                   # classicui theme generator + theme-set hook
+├── research/apk/             # Gboard APK staging (gitignored, never commit)
 └── install.sh
 ```
 
@@ -171,7 +177,11 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 - [ ] Consider upstreaming LM findings to fcitx5-chinese-addons community
 
 ### Phase 6 — v2 research track (optional, post-1.0)
-- [ ] Neural rescoring spike; mozc architecture study; own-decoder feasibility
+- [ ] Eval harness upgrade: add PD-benchmark bucket (published baseline to
+      beat: Google IME P@1=70.9) + modern-corpus + slang buckets
+- [ ] Neural rescoring spike (pinyin-constrained vocab trick for 缩写输入);
+      mozc architecture study; own-decoder feasibility
+- [ ] Fold in Gboard teardown findings (docs/research/gboard-research.md)
 
 ## 6. Risks
 
@@ -205,6 +215,16 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 - https://github.com/kpu/kenlm — trigram training
 - 墨奇科技 blog: "每个人都可以训练自己的语言模型" (corpus→segment→train recipe)
 - https://zhuanlan.zhihu.com/p/710756084 — rime grammar LM training (concept parity)
+
+**Papers (quality targets)**
+- arXiv:2203.00249 — Exploring and Adapting Chinese GPT to Pinyin Input Method
+  (Google IME baseline P@1=70.9 on PD; PinyinGPT 73.15; beam=16;
+  pinyin-constrained vocab for abbreviated pinyin; CC BY 4.0)
+- Microsoft Research — A New Statistical Approach to Chinese Pinyin Input
+  (the classic trigram-decoder architecture libime descends from)
+- ACL Y15-1052 — Neural Network Language Model for Chinese Pinyin IME
+- Yang et al. 2012 — PD dataset (People's Daily 92–98, 5.04M train / 2k test)
+  → reusable as our news-domain eval bucket
 
 **Prior art / context**
 - https://github.com/iDvel/rime-ice — great dicts, weak engine fit (our v1 lesson)
