@@ -10,8 +10,6 @@ from multiprocessing import Pool
 from opencc import OpenCC
 
 cc = OpenCC('t2s')
-SENT_SPLIT = re.compile(r'[。！？；\n]')
-HANZI = re.compile(r'[\u4e00-\u9fff]')
 NON_HANZI = re.compile(r'[^\u4e00-\u9fff]+')
 DOC_TAG = re.compile(r'</?doc[^>]*>')
 
@@ -20,11 +18,13 @@ def clean_line(line):
     if len(line) < 4:
         return []
     s = cc.convert(line)
-    s = NON_HANZI.sub('', s)          # Spike: 只保留汉字, 其余切断
+    # 每段非汉字(标点/数字/英文)都变成切分边界,
+    # 同时兼容全角/半角标点 —— 否则半角标点长段落会被整段丢弃
+    s = NON_HANZI.sub('\n', s)
     out = []
-    for sent in SENT_SPLIT.split(s):
+    for sent in s.split('\n'):
         sent = sent.strip()
-        # 最短 4 字: 避免数字剥离后残留 "年是了" 类碎片
+        # 最短 4 字: 避免残留碎片
         if 4 <= len(sent) <= 100:
             out.append(sent)
     return out
