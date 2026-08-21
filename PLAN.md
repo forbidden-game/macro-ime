@@ -1,252 +1,219 @@
-# omarime — A first-class Chinese input experience for Omarchy
+# omarime — A product-grade Chinese IME for Omarchy
 
-> Omarchy + Rime + IME. Chinese users deserve a REALLY GOOD keyboard.
+> Omarchy + RIME→libime + IME. 目标：Gboard 级别的"越用越好用"，Omarchy 级别的颜值。
 
-Status: **planning** · Target: Omarchy 4.x (Hyprland + Quickshell shell) · Date: 2026-02
+Status: **v2 plan (engine pivot)** · Target: Omarchy 4.x · Date: 2026-02
+Supersedes: rime-ice-based plan (v1) — rejected after real-world evaluation.
 
 ---
 
-## 1. Vision
+## 0. Why we pivoted (the honest engineering reason)
 
-Three promises:
+v1 assumed "deploy rime-ice = done". Real usage disproved it. The user's
+complaint decomposes into three architectural facts about RIME:
 
-1. **Effortless toggle** — English ⇄ 中文 with one hotkey, a bar indicator that
-   always tells you which mode you're in, and optional per-app memory.
-2. **Best-in-class pinyin** — modern maintained dictionaries, long-sentence
-   grammar model, fuzzy pinyin, 双拼, 中英混输, emoji, per-program state.
-3. **Beautiful, native UI** — candidate window and indicators that look like
-   they shipped with Omarchy: theme-aware colors, rounded corners, blur,
-   smooth animations. Not a foreign body on the desktop.
-
-## 2. Current state (audited on this machine)
-
-| Component | Status |
+| Complaint | Root cause in RIME's architecture |
 |---|---|
-| fcitx5 5.1.21 + fcitx5-gtk/qt | ✅ installed, `omarchy-fcitx5.service` user service (Omarchy ships this) |
-| env vars (`QT_IM_MODULE`, `XMODIFIERS`, …) | ✅ `/usr/share/omarchy/default/environment.d/10-omarchy-fcitx.conf` |
-| rime engine | ✅ fcitx5-rime 5.1.14, librime 1.17 |
-| rime schemas | ⚠️ only stock `luna_pinyin` — the "1990s" experience. This is the gap. |
-| kimpanel addon | ✅ `libkimpanel.so` present → external candidate UI is possible |
-| fcitx5 DBus controller | ✅ verified live: `org.fcitx.Fcitx.Controller1` exposes `CurrentInputMethod`, `CurrentUI`, candidate selection, config get/set |
-| Omarchy plugin kinds | `bar`, `bar-widget`, `overlay`, `panel`, `service`, `menu` — OSD/clipboard prove always-mounted layer-shell overlays work inside `omarchy-shell` |
-| Toggle hotkey | ❌ nothing bound yet; fcitx5 default Ctrl+Space unconfigured |
+| "输入预测很差" | RIME decodes **word-by-word with static, hand-tuned weights**. No sentence-level language model by default (grammar model is an optional plugin most schemas don't ship). It can't know "银行" is likelier after "去" than "很". |
+| "输入和词库的映射太差" | Syllable→candidate mapping is dict-order driven; when multiple words share pinyin, ranking is fixed priorities, not context probability. |
+| "用户词频习惯处理不好" | User dict boosts single words in a userdb. No context adaptation, no decay model, no sentence-level relearning. |
 
-**Conclusion:** plumbing exists end-to-end. What's missing is exactly our three
-promises: a great schema, hotkey UX, and a beautiful face.
+**What Gboard/谷歌拼音 actually does** (the thing the user misses):
+1. **Sentence-level decoding**: pinyin syllable lattice → Viterbi/beam search
+   over a **language model** (n-gram historically; neural in modern builds).
+2. **Online user adaptation**: a small **user language model** interpolated with
+   the base LM, updated as you type, with frequency decay. This is the
+   "越用越好用".
+3. Prediction (next-word), correction (typo-tolerant pinyin), 中英混输.
 
-## 3. Research findings
+## 1. The decisive discovery
 
-### 3.1 Engine landscape (the "REALLY GOOD pinyin" part)
-
-Two viable paths, both built on Rime (engine is already installed):
-
-| | **rime-ice 雾凇拼音** (iDvel) | **rime-wanxiang 万象拼音** (amzxyz) |
-|---|---|---|
-| Stars / activity | ~10k+, monthly dictionary releases | ~4k+, very active |
-| Philosophy | curated million-entry dictionary, out-of-box | "语句流" sentence-flow: optimized dicts + **grammar language model (octagram)** for long-sentence accuracy |
-| Long sentences | good | best-in-class (language model) |
-| Extras included | emoji, symbols, 中英混输, v-mode, calculator lua, 简繁 | same class + tonal/shuangpin variants, updater tool |
-| Install | AUR `rime-ice-git` / `rime-ice-pinyin-git`, or git clone deploy | AUR `rime-wanxiang-updater`, or release zip deploy |
-| Risk | none notable | heavier deploy; some users prefer ice's phrase feel |
-
-Community consensus (Zhihu/CSDN 2025): these two are the state of the art;
-stock luna_pinyin is what people flee from. **Decision: default = rime-ice,
-wanxiang as opt-in profile.** Both share the same patch layer we write once
-(fuzzy pinyin options, Shift behavior, per-program memory…).
-
-Must-have features checklist (each maps to concrete config work):
-
-- [ ] 全拼 + optional 小鹤双拼/自然码 profiles
-- [ ] 模糊音 (z/zh, c/ch, s/sh, n/l, …) as toggles
-- [ ] 中英混输 (type `wifi` get wifi), emoji in candidates, symbol input
-- [ ] Long-sentence composition (grammar model for wanxiang; ice's dict for default)
-- [ ] Per-program input-state memory → fcitx5 `ShareInputState=PerProgram`
-- [ ] Shift behavior sane (user already patched `ascii_composer` to noop — keep)
-- [ ] Candidate count / vertical list / font size configurable
-- [ ] User dict sync (`rime sync`) documented
-- [ ] 快符/日期/计算器 lua goodies from the chosen schema
-
-### 3.2 UI landscape (the "BEAUTIFUL" part)
-
-Options ranked by effort:
-
-**A. Classic UI theme (fcitx5 native window, restyled)** — fcitx5 has an ini +
-image theme engine. We generate a theme from the *active Omarchy theme's*
-palette (read from `~/.config/omarchy/themes/<active>/`), rounded corners,
-Sarasa/Noto CJK font, blur-friendly transparent background image. Hook into
-`omarchy hook install theme-set` so switching Omarchy themes re-skins the IME.
-*Effort: days. Reliability: bulletproof.*
-
-**B. kimpanel protocol + Quickshell plugin (native Omarchy candidate window)** —
-kimpanel is a DBus UI protocol: a panel owns bus name
-`org.kde.kimpanel.inputmethod`; fcitx5's kimpanel addon detects it at runtime
-and hands over all rendering (preedit, auxiliary text, candidate list, spot
-location) via DBus signals; actions go back via DBus. GNOME has an extension
-doing exactly this; **nobody has built one for Hyprland/Quickshell. That's our
-moat.** We render candidates as a layer-shell surface inside `omarchy-shell`
-(same process as bar/OSD → shares the theme singleton, animations, blur).
-Kill-switch safety: if our panel dies or is disabled, fcitx5 falls back to
-classicui automatically (addon only activates when the name is owned).
-*Effort: weeks. Payoff: the most beautiful IME on any Linux desktop.*
-
-Protocol references collected:
-- fcitx5 kimpanel addon (source: fcitx/fcitx5 repo, `libkimpanel.so`)
-- wengxt/gnome-shell-extension-kimpanel — compact JS reference implementation
-- KDE userbase Tutorials/Kimpanel; fcitx-im.org/wiki/Kimpanel
-- Live introspection possible locally via `busctl --user`
-
-Key engineering details to nail in B:
-- Positioning: `UpdateSpotLocation` gives cursor coords (fcitx5 gets the cursor
-  rect via input-method-v2 on Wayland). Place a borderless `PanelWindow`
-  (layer `overlay`, `keyboardInteractivity: None`, exclusiveZone `-1`) near it;
-  handle multi-monitor by matching output.
-- Latency: DBus hop ≈ 1–2 ms; preedit redraw must feel instant.
-- Focus: window must never take keyboard focus; clicks on candidates need
-  careful handling (mouse grab vs focus stealing).
-
-**C. Standalone Quickshell instance for the IME** — same as B but outside
-`omarchy-shell`. More isolation from shell updates, but a second Quickshell
-process and no shared theme singleton. Fallback if B hits shell-integration walls.
-
-**D. Bar indicator widget (中/EN)** — independent of A/B/C. A `bar-widget`
-plugin polling/subscribing to fcitx5 DBus (`CurrentInputMethod`,
-StateChanged signals), click = toggle, shows 中/EN/A icon. Cheap, huge
-perceived-value win. Do it early.
-
-### 3.3 Prior art & ecosystem
-
-- wey-gu's "Omarchy Chinese Simplified Input Config" gist — manual fcitx5+rime
-  setup; proves demand, we automate + exceed it.
-- hyprinputswitcher (Go daemon, Hyprland socket → fcitx5-remote) — per-app
-  auto-switching idea; fcitx5's `ShareInputState=PerProgram` covers most of it
-  natively, but app-class rules (e.g., force EN in certain apps) are a nice extra.
-- ArchWiki Fcitx5 page — canonical troubleshooting (XWayland/Electron caveats).
-- fcitx5-chinese-addons (built-in pinyin with cloudpinyin) — alternative engine;
-  kept off the critical path but noted: its cloudpinyin could inspire a later
-  rime-lua cloud feature.
-
-### 3.4 Known risks
-
-| Risk | Mitigation |
-|---|---|
-| XWayland/Electron apps misbehave (focus/popup position) | Test matrix in Phase 1: alacritty, foot, kitty, Chrome, Electron apps, GTK3/4, Qt6, Steam/Wine spot-checks; document flags (`--enable-wayland-ime`) where needed |
-| kimpanel positioning accuracy on Hyprland | Prototype spike before committing to B; classicui theme (A) remains the shipping fallback |
-| quickshell DBus API gaps (git 0.3.0) | Spike early; worst case use tiny helper script via `Quickshell.process` or C plugin |
-| Schema updates break user patches | Our patches live in `*.custom.yaml` overlay files only; never fork upstream schema files |
-| Two engines confusion (rime vs chinese-addons) | Ship exactly one path; uninstall guide for the other |
-
-## 4. Architecture (target)
+**libime** (by fcitx5's author, wengxt) is a production C++ IME engine library
+that already implements exactly this architecture — it powers fcitx5's
+built-in Pinyin (fcitx5-chinese-addons). Verified from the Arch package file
+list (libime 1.1.15):
 
 ```
-┌────────────────────────── omarchy-shell (Quickshell) ──────────────────────────┐
-│  ┌───────────────┐   ┌──────────────────────────┐   ┌────────────────────────┐ │
-│  │ bar-widget    │   │ omarime.candidate        │   │ theme singleton        │ │
-│  │ 中/EN + click │   │ kimpanel panel (layer-   │   │ (colors, radius, font) │ │
-│  │ = toggle      │   │ shell overlay, animated) │◄──┤                        │ │
-│  └──────┬────────┘   └───────────┬──────────────┘   └────────────────────────┘ │
-└─────────┼────────────────────────┼──────────────────────────────────────────────┘
-          │ DBus org.fcitx.Fcitx.Controller1        │ DBus org.kde.kimpanel.inputmethod
-┌─────────▼────────────────────────▼─────────────┐
-│ fcitx5 (omarchy-fcitx5.service)                │
-│   └─ fcitx5-rime → rime-ice / wanxiang schema  │
-│      + our *.custom.yaml patch layer           │
-└────────────────────────────────────────────────┘
-          ▲
-   Hyprland bindings: Super+Space → fcitx5-remote -t (+ Ctrl+Space in-engine)
+core/decoder.h  core/lattice.h          # beam/Viterbi decoder over a lattice
+core/languagemodel.h                    # LM interface (trie SLM format)
+core/userlanguagemodel.h                # ← online user LM adaptation
+core/historybigram.h                    # ← user history bigram cache
+core/prediction.h                       # ← next-word prediction
+pinyin/pinyincontext.h                  # full pinyin session API
+pinyin/pinyincorrectionprofile.h        # ← typo/fuzzy correction profiles
+tools: libime_pinyindict (build dicts), libime_slm_build_binary (build LM),
+       libime_prediction, libime_history
+```
+
+**The catch — and our product opportunity:** the shipped `zh_CN.lm` trigram
+model descends from the sunpinyin-era `lm_sc.3gm` corpus (~2008–2010 web/People's
+Daily data). The *decoder* is good; the *model* is ancient. That — not the
+architecture — is why stock fcitx5-pinyin also disappoints on modern
+vocabulary and prediction, and why everyone flees to rime-ice's dictionaries
+(which don't fix the model problem either).
+
+**omarime = keep the proven decoder, train the missing modern brain, wrap it in
+a beautiful native UI.**
+
+## 2. Module selection (best-of-breed assembly)
+
+| Layer | Choice | Why | Alternative rejected |
+|---|---|---|---|
+| Frontend/protocol | **fcitx5** (already in Omarchy) | text-input-v3 + input-method-v2, DBus API verified live | ibus (GNOME-centric), raw zwp (rebuild the world) |
+| Engine core | **libime** via fcitx5-pinyin (v1) → own thin fcitx5 addon linking libime (v2, for full control) | proven decoder + user LM + prediction + correction, C++, fast | RIME (static weights, weak adaptation — the reason for this pivot) |
+| Language model | **Ours**: trigram trained with **kenlm** on modern corpora → ARPA → `libime_slm_build_binary` | the single highest-leverage quality lever; nobody ships a fresh one | octagram grammar for rime (still inside rime's weak adaptation loop) |
+| Dictionaries | **Ours**: curated merge (zhwiki titles, THUOCL, open Sogou-cell conversions, Jun Da freq) → `libime_pinyindict` | dict quality = coverage; LM quality = ranking | rime-ice dicts (good data, wrong engine) |
+| User adaptation | libime **UserLanguageModel + HistoryBigram**, tuned & verified on | the "越用越好用" property, built-in | rime userdb (single-word boost only) |
+| Cloud (opt-in) | fcitx5 cloudpinyin addon, **off by default** | privacy-first; optional boost | — |
+| Candidate UI | **kimpanel → Quickshell plugin** in omarchy-shell | native Omarchy look; nobody has built this for Hyprland (verified) | classicui themes (fallback only) |
+| Indicator/toggle | bar-widget + `Super+Space` → `fcitx5-remote -t` + per-program memory (`ShareInputState=PerProgram`) | trivial, high value | — |
+| Packaging | install.sh (idempotent, backup-first) + AUR where possible | out-of-box | — |
+
+**v2 research track (post-1.0):** neural rescoring — small transformer/GRU LM
+(10–30M params, int8, CPU-realtime) shallow-fused into the beam; either patch
+libime's scoring hook or fork decoder into `omarime-engine` (Rust). Also
+evaluate mozc's recent neural work as architectural reference.
+
+## 3. Architecture
+
+```
+┌────────────────────────── omarchy-shell (Quickshell) ─────────────────────┐
+│  [bar-widget 中/EN]   [kimpanel candidate overlay]   [theme singleton]    │
+└───────┬──────────────────────┬────────────────────────────────────────────┘
+        │ Controller1 DBus     │ org.kde.kimpanel.inputmethod
+┌───────▼──────────────────────▼───────────────────────────────────────────┐
+│ fcitx5 (omarchy-fcitx5.service)                                          │
+│  └─ pinyin addon (fcitx5-chinese-addons / later: omarime addon)          │
+│      ├─ libime decoder + PinyinCorrection + Prediction                   │
+│      ├─ omarime.lm  ← OUR modern trigram (kenlm → libime SLM binary)     │
+│      ├─ omarime.dict ← OUR merged dictionaries (libime_pinyindict)       │
+│      └─ UserLanguageModel (~/.local/share/fcitx5/pinyin/)  越用越好用      │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 Repo layout:
 
 ```
 omarime/
-├── PLAN.md                  # this file
-├── README.md                # user-facing intro & quickstart
-├── docs/
-│   ├── research.md          # links & notes from investigation
-│   └── architecture.md      # deep-dive on chosen option (Phase 2 exit)
-├── engine/
-│   ├── install.sh           # AUR deps + schema deploy + deploy + verify
-│   ├── rime-ice.patch/      # default.custom.yaml etc. (our overlay layer)
-│   └── wanxiang.patch/
-├── hypr/
-│   └── bindings.snippet.lua # Super+Space toggle binding + comments
+├── PLAN.md, README.md
+├── docs/                     # research, architecture, eval methodology
+├── data/
+│   ├── corpora/README.md     # sources, licenses, prep scripts
+│   ├── dicts/                # curated dict sources + merge rules
+│   └── eval/                 # test sentences (pinyin → expected hanzi)
+├── lm/
+│   ├── train.sh              # clean → segment → kenlm → ARPA → libime binary
+│   └── eval.sh               # CER/top-1 on eval set, old-LM vs omarime-LM
+├── engine/                   # fcitx5 config layer, fuzzy presets, hotkeys
+├── hypr/                     # bindings snippet
 ├── plugins/
-│   ├── omarime.indicator/   # Phase 2: bar-widget (manifest.json + QML)
-│   └── omarime.candidate/   # Phase 3: kimpanel panel plugin
-├── themes/
-│   ├── build-from-omarchy.sh# generate classicui theme from active theme
-│   └── hooks/theme-set.sh   # re-skin on `omarchy theme set`
-└── install.sh               # one-command setup (idempotent, backup-first)
+│   ├── omarime.indicator/    # bar-widget 中/EN (Phase 3)
+│   └── omarime.candidate/    # kimpanel Quickshell overlay (Phase 4)
+├── themes/                   # classicui theme generator + theme-set hook
+└── install.sh
 ```
+
+## 4. The data/LM pipeline (the actual "REALLY GOOD" work)
+
+Corpora candidates (all to be license-audited in Phase 2):
+- zhwiki + wiktionary titles (CC BY-SA) — entity coverage
+- THUCNews / People's Daily 1998 (research licenses) — clean formal text
+- OpenSubtitles zh — colloquial sentence flow (what Gboard-style IMEs weight heavily)
+- zhwiki word freq (fcitx5-pinyin-zhwiki tooling exists as reference)
+- Community open dicts: jiejie/THUOCL cells for dict merge only
+
+Pipeline: clean → jieba/lac segment → dedupe → kenlm trigram (prune) →
+ARPA → `libime_slm_build_binary` → swap-in test. Target size: 20–80 MB binary
+(in-memory trie, load < 200 ms).
+
+**Eval harness (non-negotiable):** a growing test set of real sentences with
+pinyin keys (news/colloquial/names/internet slang buckets); metric = top-1
+sentence accuracy + top-10 hit rate; every LM/dict iteration must beat the
+previous on the harness *and* in a blind feel-test. This is how we avoid
+"rime-ice felt bad" subjectivity drift.
 
 ## 5. Roadmap
 
 ### Phase 0 — Baseline & safety (half day)
-- [ ] Backup current `~/.config/fcitx5`, `~/.local/share/fcitx5/rime`
-- [ ] Record baseline UX notes (screenshots of stock luna_pinyin)
-- [ ] Decide open questions (§7)
+- [ ] Backup fcitx5/rime state; screenshots of current feel
+- [ ] Install fcitx5-chinese-addons + libime; enable pinyin IM; keep rime as fallback
+- [ ] Confirm user-model files appear under `~/.local/share/fcitx5/pinyin/`
 
-### Phase 1 — Engine excellence (1–2 days) ← biggest quality win
-- [ ] `engine/install.sh`: install rime-ice (AUR or vendored), apply our patch
-      layer, redeploy, set rime as default IM
-- [ ] Patch layer: fuzzy-pinyin presets, Shift/Caps policy, per-program memory
-      (`ShareInputState=PerProgram`), candidate count, 简繁 switch key
-- [ ] Hotkeys: keep fcitx5 Ctrl+Space; add Hyprland `Super+Space` →
-      `fcitx5-remote -t`; document both
-- [ ] App test matrix pass; write `docs/troubleshooting.md`
-- [ ] Acceptance: typing feels ≥ Sogou-on-Windows for daily sentences; toggle
-      works everywhere; no focus bugs in the matrix
+### Phase 1 — Engine baseline that doesn't embarrass us (1–2 days)
+- [ ] fcitx5-pinyin configured: fuzzy presets, 双拼 profile, prediction ON,
+      correction ON, `ShareInputState=PerProgram`, cloud OFF
+- [ ] Hotkeys: `Super+Space` (Hyprland → `fcitx5-remote -t`) + Ctrl+Space
+- [ ] App test matrix (alacritty/foot/kitty/Chrome/Electron/GTK/Qt/XWayland)
+- [ ] Exit: daily typing works everywhere, toggle instant, per-app memory holds
 
-### Phase 2 — Beauty pass + indicator (2–3 days)
-- [ ] `themes/build-from-omarchy.sh`: classicui theme generated from active
-      Omarchy palette (dark/light aware), Sarasa/Noto CJK font check/install
-- [ ] `theme-set` hook so IME follows `omarchy theme set`
-- [ ] `plugins/omarime.indicator`: bar widget 中/EN, click-to-toggle, tooltip
-      with current schema; publish to your plugins repo
-- [ ] Optional: OSD toast on mode switch if omarchy.osd exposes generic text IPC
-- [ ] Acceptance: screenshots that look at home next to Omarchy defaults
+### Phase 2 — The brain: data + LM + eval (1–2 weeks, the core R&D)
+- [ ] Corpus collection + license audit + prep scripts
+- [ ] kenlm trigram v1; convert; A/B vs stock zh_CN.lm on eval harness
+- [ ] Dict merge v1 → `libime_pinyindict`; coverage check for names/slang
+- [ ] User-model tuning: verify adaptation actually updates candidates
+      (type a name 3×, it should rank #1); document reset/sync
+- [ ] Exit: eval harness shows ≥ stock by a wide margin; blind test preferred
 
-### Phase 3 — The moonshot: native candidate window (1–2 weeks)
-- [ ] Spike: minimal Quickshell DBus listener owning `org.kde.kimpanel.inputmethod`;
-      confirm fcitx5 switches `CurrentUI` to kimpanel; dump signal traffic
-- [ ] Render preedit + candidates near spot location; number/click/page actions
-- [ ] Polish: theme singleton colors, radius/blur/shadow, show/hide animation,
-      multi-monitor, DPI scaling, vertical/horizontal layouts
-- [ ] Safety: disable-switch (falls back to classicui), crash-safe fallback
-- [ ] Acceptance: side-by-side video vs classicui; zero perceptible latency
+### Phase 3 — Beauty + indicator (2–3 days)
+- [ ] classicui theme generated from active Omarchy theme + `theme-set` hook
+- [ ] `omarime.indicator` bar widget (中/EN, click-toggle, schema tooltip)
+- [ ] Optional OSD toast on switch
 
-### Phase 4 — Package & share
-- [ ] Single `install.sh` / `uninstall.sh`, idempotent, backup-first
-- [ ] README with screenshots/GIFs (中英双语)
-- [ ] Publish repo; consider PR to omarchy-community / gist upgrade thread
+### Phase 4 — Native candidate window (1–2 weeks)
+- [ ] kimpanel spike: Quickshell DBus listener owns `org.kde.kimpanel.inputmethod`;
+      fcitx5 `CurrentUI` switches; dump signal traffic
+- [ ] Full overlay: spot-location placement, multi-monitor, DPI, animations,
+      blur, vertical/horizontal layouts, click/page actions
+- [ ] Kill-switch: disable plugin → classicui fallback (verified behavior)
 
-## 6. Why this will be good (design principles)
+### Phase 5 — Product & publish
+- [ ] `install.sh`/`uninstall.sh`, README (中英双语, GIFs), eval results published
+- [ ] Consider upstreaming LM findings to fcitx5-chinese-addons community
 
-1. **Thin overlay, thick upstream.** We never fork rime-ice/wanxiang/fcitx5;
-   every customization is an overlay (`*.custom.yaml`, themes, plugins) so
-   upstream updates keep flowing.
-2. **Degrade gracefully.** Every fancy layer has a boring fallback: custom UI →
-   themed classicui → stock. Nothing bricks typing.
-3. **Native or nothing.** If it doesn't look like Omarchy shipped it, it's not done.
-4. **Measure the feel.** Latency budget for candidate render < 16 ms/frame;
-   toggle feedback instant (indicator + optional toast).
+### Phase 6 — v2 research track (optional, post-1.0)
+- [ ] Neural rescoring spike; mozc architecture study; own-decoder feasibility
 
-## 7. Open decisions (need your call)
+## 6. Risks
 
-1. **Default schema:** rime-ice (recommended) or wanxiang? Or installer flag with ice default?
-2. **Toggle hotkey:** Super+Space? (Ctrl+Space stays as in-engine fallback either way)
-3. **双拼:** ship Xiaohe/Ziranma profiles now or later?
-4. **Phase order:** agree with 1→2→3, or jump straight to the kimpanel prototype after Phase 1?
-5. **License:** MIT like your other repos?
+| Risk | Mitigation |
+|---|---|
+| kenlm trigram still < Gboard quality | Gboard's edge is data volume + neural; we close the gap iteratively (Phase 6). Even a fresh 2020s trigram beats a 2008 one massively. |
+| libime LM format constraints (trie SLM, quantized probs) | Validate `libime_slm_build_binary` round-trip early in Phase 2; keep ARPA source of truth |
+| User-model behavior unclear/buggy | Phase 0/2 verification tasks; worst case implement our own adaptation layer via own addon (v2) |
+| Corpora licenses | Audit before shipping; prefer CC BY-SA / research-permitted; never ship scraped-proprietary text |
+| kimpanel positioning on Hyprland | Spike first (Phase 4), classicui theme remains shipping fallback |
+| XWayland/Electron quirks | Known flags documented in troubleshooting.md; test matrix gate |
+
+## 7. Open decisions
+
+1. ~~rime-ice vs wanxiang~~ → moot (engine pivoted to libime)
+2. 双拼 in Phase 1 or later? (config-only, cheap — default: include Xiaohe)
+3. Cloud pinyin: keep OFF by default? (recommend OFF)
+4. Phase order OK? (1 → 2 → 3 → 4; Phase 2 is the long pole)
+5. License for omarime itself: MIT? (data files keep their own licenses)
 
 ## 8. References
 
-- https://github.com/iDvel/rime-ice — 雾凇拼音
-- https://github.com/amzxyz/rime-wanxiang — 万象拼音
-- https://fcitx-im.org/wiki/Kimpanel — kimpanel overview
-- https://github.com/wengxt/gnome-shell-extension-kimpanel — reference panel impl
-- https://fcitx-im.org/wiki/Using_Fcitx_5_on_Wayland — Wayland app notes
-- https://wiki.archlinux.org/title/Fcitx5 — ArchWiki
-- https://gist.github.com/wey-gu/2875e6037829fa3e78b5f2e5365b71c2 — prior Omarchy manual setup
-- https://fcitx-im.org/wiki/Theme_Customization — classicui theme engine
-- Local: `busctl --user introspect org.fcitx.Fcitx5 /controller` — live API
+**Engine/libime**
+- https://github.com/fcitx/libime — decoder, UserLanguageModel, Prediction
+- https://github.com/fcitx/fcitx5-chinese-addons — reference frontend
+- Local: `pacman -Fl libime` — tools verified: `libime_pinyindict`,
+  `libime_slm_build_binary`, `libime_prediction`, `libime_history`
+- https://github.com/fcitx/fcitx5 — frontend/DBus (verified live introspection)
+
+**LM training**
+- https://github.com/kpu/kenlm — trigram training
+- 墨奇科技 blog: "每个人都可以训练自己的语言模型" (corpus→segment→train recipe)
+- https://zhuanlan.zhihu.com/p/710756084 — rime grammar LM training (concept parity)
+
+**Prior art / context**
+- https://github.com/iDvel/rime-ice — great dicts, weak engine fit (our v1 lesson)
+- https://github.com/amzxyz/rime-wanxiang — octagram grammar in rime
+- https://github.com/gaboolic/rime-frost — corpus-prep scripting reference
+- sunpinyin — historical SLM engine (origin of lm_sc.3gm shipped today)
+- Google Pinyin/Gboard — product north star (sentence decode + adaptation)
+
+**UI** (unchanged from v1)
+- kimpanel: https://fcitx-im.org/wiki/Kimpanel + wengxt/gnome-shell-extension-kimpanel
+- https://fcitx-im.org/wiki/Using_Fcitx_5_on_Wayland · ArchWiki Fcitx5
+- Omarchy plugin kinds & IPC verified locally (see docs/research.md)

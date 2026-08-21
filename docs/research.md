@@ -62,3 +62,26 @@ Raw findings from the investigation (2026-02). Machine audit details are in
 
 Full search JSON snapshots kept out of the repo (transient); key links are in
 PLAN.md §8.
+
+## Papers & quality benchmarks (2026-02 update)
+
+- **arXiv:2203.00249** "Exploring and Adapting Chinese GPT to Pinyin Input
+  Method" — the single most relevant paper for Phase 6:
+  - Google IME measured on PD dataset: **P@1=70.90 / P@2=78.30 / P@3=82.30**
+    → our definition of "Gboard-level decoder"
+  - PinyinGPT (frozen GPT + pinyin-constrained vocab, beam=16): P@1=73.15
+  - Abbreviated pinyin (首字母缩写) is the hard case; constrained vocab fixes it
+  - Latency: 6-layer transformer ≈ 30% faster than 12-layer
+  - PD dataset (Yang et al. 2012): People's Daily 1992–98, 5.04M train segs /
+    2000 test — reusable as eval-harness news bucket
+- **Microsoft Research**: "A New Statistical Approach to Chinese Pinyin Input"
+  — the founding trigram-decoder paper; libime/sunpinyin lineage.
+- **ACL Y15-1052**: NNLM for Chinese Pinyin IME — early neural evidence.
+
+## Gboard black-box research
+
+Program, guardrails, and acquisition paths:
+[research/gboard-research.md](gboard-research.md). Summary: base APK gives
+inventory-level intel only; zh language pack + user model live in app-private
+storage (needs rooted emulator). Behavioral spec sourced from daily-use
+experiments. Nothing proprietary ever enters the repo (`research/apk/` gitignored).
