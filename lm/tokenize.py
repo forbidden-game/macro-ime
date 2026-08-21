@@ -58,14 +58,29 @@ def work(line):
         return ""
     return " ".join(fmm(line))
 
-def main(vocab_path, src, dst, workers=12):
-    with open(src, encoding='utf-8') as f:
-        lines = f.readlines()
-    with Pool(workers, initializer=init, initargs=(vocab_path,)) as p:
-        results = p.map(work, lines, chunksize=2000)
-    with open(dst, 'w', encoding='utf-8') as out:
-        out.write('\n'.join(r for r in results if r))
-    print(f"segmented {len(lines)} lines -> {dst}")
+def process_batch(batch):
+    return [work(l) for l in batch]
+
+def main(vocab_path, src, dst, workers=12, batch_lines=500000):
+    """流式分批: 每批 batch_lines 行, 内存 O(batch) 而非 O(全文件)"""
+    def batches():
+        batch = []
+        with open(src, encoding='utf-8') as f:
+            for line in f:
+                batch.append(line)
+                if len(batch) >= batch_lines:
+                    yield batch
+                    batch = []
+        if batch:
+            yield batch
+
+    total = 0
+    with Pool(workers, initializer=init, initargs=(vocab_path,)) as p, \
+         open(dst, 'w', encoding='utf-8') as out:
+        for results in p.imap(process_batch, batches(), chunksize=1):
+            out.write('\n'.join(r for r in results if r) + '\n')
+            total += len(results)
+    print(f"segmented ~{total} lines -> {dst}")
 
 if __name__ == '__main__':
     main(sys.argv[1], sys.argv[2], sys.argv[3],

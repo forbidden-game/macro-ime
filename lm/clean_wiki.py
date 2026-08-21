@@ -29,30 +29,38 @@ def clean_line(line):
             out.append(sent)
     return out
 
-def work(path):
-    seen = set()
-    with open(path, encoding='utf-8', errors='ignore') as f:
-        lines = f.readlines()
-    sents = []
-    for ln in lines:
-        for s in clean_line(ln):
-            if s not in seen:
-                seen.add(s)
-                sents.append(s)
-    return sents
+def work(args):
+    """流式处理: 逐行读写, 内存 O(1), 不做跨行去重
+    (重复句对 LM 等于天然频次加权, 无害; 全局去重交给 sort -u)"""
+    path, outpath = args
+    n = 0
+    with open(path, encoding='utf-8', errors='ignore') as f, \
+         open(outpath, 'w', encoding='utf-8') as out:
+        for line in f:
+            for s in clean_line(line):
+                out.write(s + '\n')
+                n += 1
+    return n
 
 def main(indir, dst, workers=12):
     files = sorted(glob.glob(f"{indir}/**/wiki_*", recursive=True))
+    import os, tempfile
+    tmpdir = tempfile.mkdtemp(prefix='omarime-clean-')
+    jobs = [(p, os.path.join(tmpdir, f"part{i:04d}")) for i, p in enumerate(files)]
     with Pool(workers) as p:
-        chunks = p.map(work, files)
-    total, seen = 0, set()
-    with open(dst, 'w', encoding='utf-8') as out:
-        for sents in chunks:
-            for s in sents:
-                if s not in seen:
-                    seen.add(s)
-                    out.write(s + '\n')
-                    total += 1
+        counts = p.map(work, jobs)
+    # 拼接各部分 (不去重; 如需去重由调用方 sort -u 完成)
+    total = sum(counts)
+    with open(dst, 'wb') as out:
+        for _, part in jobs:
+            with open(part, 'rb') as f:
+                while True:
+                    buf = f.read(1 << 20)
+                    if not buf:
+                        break
+                    out.write(buf)
+            os.remove(part)
+    os.rmdir(tmpdir)
     print(f"clean sentences: {total} -> {dst}")
 
 if __name__ == '__main__':
