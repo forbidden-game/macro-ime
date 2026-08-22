@@ -1,0 +1,66 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-addon:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ pkg-config \
+            libfcitx5-dev libfcitx5utils-dev
+
+      - name: Build event addon
+        run: |
+          cmake -S engine/omarime-state -B build \
+                -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      - name: Verify addon
+        run: |
+          file build/libomarime-state.so
+          # Smoke test: the .so should be a valid ELF shared object
+          readelf -h build/libomarime-state.so | grep -q "Shared object"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omarime-addon
+          path: |
+            build/libomarime-state.so
+            build/omarime-state.conf
+
+  # Release: triggered by git tag (e.g. v1.0.0)
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-addon
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: omarime-addon
+          path: release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/libomarime-state.so
+          draft: true
+          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

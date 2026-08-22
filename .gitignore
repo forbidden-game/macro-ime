@@ -7,3 +7,14 @@ work/
 # compiled eval test binaries (sources are tracked)
 eval/d-flip-exp
 eval/test-weight-persist
+
+# build artifacts
+build/
+dist/
+*.so
+!dist/libomarime-state.so
+
+# language model files (distributed via GitHub Releases)
+*.lm
+*.lm.predict
+*.arpa
