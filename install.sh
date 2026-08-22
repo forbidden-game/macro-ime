@@ -8,6 +8,7 @@
 #   ~/.local/share/omarime/themes/omarime-theme   classicui theme generator
 #   ~/.local/share/fcitx5/themes/omarime          generated theme (live)
 #   ~/.local/share/omarime/bin/omarime-config     settings backend (live-reload)
+#   ~/.local/share/omarime/lib/fcitx5/             event-driven state addon
 #   ~/.config/omarchy/hooks/theme-set.d/omarime.sh  palette follows omarchy themes
 #   ~/.config/omarchy/plugins/omarime.indicator    中/EN bar widget
 #   ~/.config/omarchy/plugins/omarime.settings     settings panel (right-click widget)
@@ -19,6 +20,9 @@ PLUGIN_DIR="${HOME}/.config/omarchy/plugins"
 UI_CONF="${HOME}/.config/fcitx5/conf/classicui.conf"
 CORE_CONF="${HOME}/.config/fcitx5/config"
 BACKUP_DIR="$OMARIME_HOME/backup"
+STATE_ADDON_CONF="${HOME}/.local/share/fcitx5/addon/omarime-state.conf"
+FCITX_DROPIN="${HOME}/.config/systemd/user/omarchy-fcitx5.service.d/omarime-state.conf"
+RUNTIME_STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/${UID}}/omarime"
 
 service_running() {
   case $(systemctl --user is-active omarchy-fcitx5.service 2>/dev/null || true) in
@@ -51,20 +55,25 @@ undo() {
   stop_fcitx
   restore_file classicui.conf "$UI_CONF"
   restore_file config "$CORE_CONF"
-  if (( was_active )); then
-    systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
-    systemctl --user start omarchy-fcitx5.service
-  fi
 
   # Remove shell.json references while the manifests are still discoverable.
   omarchy plugin disable omarime.indicator >/dev/null 2>&1 || true
   omarchy plugin disable omarime.settings >/dev/null 2>&1 || true
 
+  # Restore any files that occupied our addon/drop-in paths before install.
+  restore_file state-addon.conf "$STATE_ADDON_CONF"
+  restore_file fcitx-dropin.conf "$FCITX_DROPIN"
   rm -rf "$OMARIME_HOME" \
          "$HOME/.local/share/fcitx5/themes/omarime" \
          "$HOME/.config/omarchy/hooks/theme-set.d/omarime.sh" \
          "$PLUGIN_DIR/omarime.indicator" \
-         "$PLUGIN_DIR/omarime.settings"
+         "$PLUGIN_DIR/omarime.settings" \
+         "$RUNTIME_STATE_DIR"
+  systemctl --user daemon-reload
+  if (( was_active )); then
+    systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+    systemctl --user start omarchy-fcitx5.service
+  fi
   echo "omarime: removed; fcitx5 config restored to its pre-install state"
 }
 
@@ -74,6 +83,35 @@ backup_file_once() { # backup_file_once <source> <backup-name>
   if [[ -f $source ]]; then cp "$source" "$BACKUP_DIR/$backup"
   else touch "$BACKUP_DIR/$backup.missing"
   fi
+}
+
+build_state_addon() {
+  local build_dir
+  for command in cmake c++ pkg-config; do
+    command -v "$command" >/dev/null || {
+      echo "omarime: missing build dependency: $command" >&2; return 1; }
+  done
+  pkg-config --exists 'Fcitx5Core >= 5.1' || {
+    echo "omarime: Fcitx5Core development files are required" >&2; return 1; }
+
+  build_dir=$(mktemp -d)
+  cmake -S "$SRC/engine/omarime-state" -B "$build_dir" \
+    -DCMAKE_BUILD_TYPE=Release >/dev/null
+  cmake --build "$build_dir" --parallel >/dev/null
+
+  mkdir -p "$OMARIME_HOME/lib/fcitx5" "$(dirname "$STATE_ADDON_CONF")" \
+           "$(dirname "$FCITX_DROPIN")"
+  backup_file_once "$STATE_ADDON_CONF" state-addon.conf
+  backup_file_once "$FCITX_DROPIN" fcitx-dropin.conf
+  install -m 0755 "$build_dir/libomarime-state.so" \
+    "$OMARIME_HOME/lib/fcitx5/libomarime-state.so"
+  install -m 0644 "$build_dir/omarime-state.conf" "$STATE_ADDON_CONF"
+  cat >"$FCITX_DROPIN" <<EOF
+[Service]
+Environment="FCITX_ADDON_DIRS=%h/.local/share/omarime/lib/fcitx5:/usr/lib/fcitx5"
+EOF
+  systemctl --user daemon-reload
+  rm -rf "$build_dir"
 }
 
 prepare_fcitx_config() {
@@ -120,6 +158,10 @@ mkdir -p "${HOME}/.config/omarchy/hooks/theme-set.d"
 install -m 0755 "$SRC/themes/hook-theme-set.sh" \
   "${HOME}/.config/omarchy/hooks/theme-set.d/omarime.sh"
 
+# Build the event bridge against this machine's fcitx5 ABI. The theme apply
+# below restarts fcitx5 once, which loads the new addon and systemd environment.
+build_state_addon
+
 # 2. shell plugins ------------------------------------------------------------
 mkdir -p "$PLUGIN_DIR"
 for p in omarime.indicator omarime.settings; do
@@ -152,7 +194,7 @@ omarchy restart shell >/dev/null 2>&1 || true
 echo
 echo "omarime installed:"
 echo "  candidate window   follows the active omarchy theme (hook regenerates on switch)"
-echo "  bar indicator      中/EN · left-click toggles · right-click opens settings"
+echo "  bar indicator      event-driven 中/EN · left-click toggle · right-click settings"
 echo "  settings panel     fuzzy pairs, correction, vertical list, cloud pinyin,"
 echo "                     user-dict reset — atomic DBus config writes"
 echo "  rollback           $SRC/install.sh --undo"

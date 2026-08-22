@@ -1,0 +1,11 @@
+[Addon]
+Name=omarime state bridge
+Comment=Event-driven fcitx5 input state for the Omarchy bar
+Type=SharedLibrary
+Library=libomarime-state
+Category=Module
+Version=@PROJECT_VERSION@
+OnDemand=False
+
+[Addon/Dependencies]
+0=core:@FCITX_VERSION@

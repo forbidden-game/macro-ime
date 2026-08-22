@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell
-import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
@@ -12,26 +11,26 @@ import qs.Commons
 // tokens: 中 in accent while composing, A dimmed while in English mode.
 // Click toggles, exactly like Ctrl+Space; the bar itself is the feedback.
 //
-// fcitx5 exposes no active-state signal anywhere on the bus (Controller1 is
-// methods-only), so the reading is event-driven where it can be: focus
-// changes are when per-program state moves (ShareInputState=PerProgram), so
-// Hyprland's activewindow events trigger a refresh, with a short poll as the
-// safety net and an immediate re-read after a click.
+// The omarime-state fcitx5 addon watches activation/deactivation/switch/focus
+// events inside fcitx5 and writes $XDG_RUNTIME_DIR/omarime/state. FileView
+// turns that into an immediate bar update without polling processes. A
+// low-frequency check only recovers from addon/service failures.
 
 BarWidget {
   id: root
   moduleName: "omarime.indicator"
 
-  // per-widget shell.json override: {"pollMs": 2000}
-  readonly property int pollMs: root.setting("pollMs", 2000)
+  // per-widget shell.json override: {"fallbackPollMs": 30000}
+  readonly property int fallbackPollMs: root.setting("fallbackPollMs", 30000)
+  readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR") + "/omarime/state"
 
   // fcitx5-remote state: 0 not running, 1 inactive, 2 active
   property int imState: 0
   readonly property bool imActive: imState === 2
   readonly property bool imRunning: imState > 0
 
-  // A click lands on the state the next reading will confirm; queue a re-read
-  // if one is already in flight rather than trusting the pre-toggle value.
+  // Only fallback checks use this process. Queue one retry if a check is
+  // already in flight; normal state changes arrive through FileView.
   property bool refreshPending: false
 
   function refresh() {
@@ -43,15 +42,21 @@ BarWidget {
     queryProc.running = true
   }
 
+  function applyState(text) {
+    const n = parseInt(String(text).trim(), 10)
+    if (isFinite(n) && n >= 0 && n <= 2) root.imState = n
+  }
+
   Component.onCompleted: root.refresh()
 
-  Connections {
-    target: Hyprland
-    function onRawEvent(event) {
-      if (!event || !event.name) return
-      // Per-program state moves when focus moves.
-      if (String(event.name).indexOf("activewindow") === 0) root.refresh()
-    }
+  FileView {
+    id: stateFile
+    path: root.statePath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyState(text())
+    onFileChanged: reload()
+    onLoadFailed: root.refresh()
   }
 
   Process {
@@ -88,20 +93,12 @@ BarWidget {
     }
   }
 
-  // Safety net because Ctrl+Space in the focused app raises no Hyprland
-  // event. Cheap: one short-lived process per tick.
+  // Recovery only; normal input-mode and focus changes are file events.
   Timer {
     id: pollTimer
-    interval: root.pollMs > 300 ? root.pollMs : 2000
+    interval: root.fallbackPollMs >= 5000 ? root.fallbackPollMs : 30000
     running: true
     repeat: true
-    onTriggered: root.refresh()
-  }
-
-  Timer {
-    // Let fcitx5 settle after a toggle before reading back.
-    id: clickTimer
-    interval: 250
     onTriggered: root.refresh()
   }
 
@@ -128,7 +125,6 @@ BarWidget {
         return
       }
       if (root.bar) root.bar.run("fcitx5-remote -t")
-      clickTimer.restart()
     }
   }
 }

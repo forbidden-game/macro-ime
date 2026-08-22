@@ -66,7 +66,7 @@ a beautiful native UI.**
 | User adaptation | libime **UserLanguageModel + HistoryBigram**, tuned & verified on | the "越用越好用" property, built-in | rime userdb (single-word boost only) |
 | Cloud (opt-in) | fcitx5 cloudpinyin addon, **off by default** | privacy-first; optional boost | — |
 | Candidate UI | **kimpanel → Quickshell plugin** in omarchy-shell | native Omarchy look; nobody has built this for Hyprland (verified) | classicui themes (fallback only) |
-| Indicator/toggle | bar-widget + `Super+Space` → `fcitx5-remote -t` + per-program memory (`ShareInputState=PerProgram`) | trivial, high value | — |
+| Indicator/toggle | event addon + bar-widget + `Ctrl+Space` + per-program memory (`ShareInputState=PerProgram`) | immediate, native, user-selected hotkey | polling-only indicator |
 | Packaging | install.sh (idempotent, backup-first) + AUR where possible | out-of-box | — |
 
 **v2 research track (post-1.0):** neural rescoring — small transformer LM
@@ -109,7 +109,7 @@ omarime/
 ├── lm/
 │   ├── train.sh              # clean → segment → kenlm → ARPA → libime binary
 │   └── eval.sh               # CER/top-1 on eval set, old-LM vs omarime-LM
-├── engine/                   # fcitx5 config layer, fuzzy presets, hotkeys
+├── engine/                   # fcitx5 config + omarime-state event addon
 ├── hypr/                     # bindings snippet
 ├── bin/omarime-config        # live fcitx5 settings backend
 ├── plugins/
@@ -153,7 +153,7 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 ### Phase 1 — Engine baseline that doesn't embarrass us (1–2 days)
 - [ ] fcitx5-pinyin configured: fuzzy presets, 双拼 profile, prediction ON,
       correction ON, `ShareInputState=PerProgram`, cloud OFF
-- [ ] Hotkeys: `Super+Space` (Hyprland → `fcitx5-remote -t`) + Ctrl+Space
+- [x] Hotkey: preserve the user's `Ctrl+Space`; no Super+Space override
 - [ ] App test matrix (alacritty/foot/kitty/Chrome/Electron/GTK/Qt/XWayland)
 - [ ] Exit: daily typing works everywhere, toggle instant, per-app memory holds
 
@@ -171,8 +171,10 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
       font from fc-match; recipe = omarchy popup: bg fill + accent border;
       preedit in panel via PreeditEnabledByDefault=False; verified on
       retro-82 dark + catppuccin-latte light, horizontal + vertical)
+- [x] `omarime-state` C++ addon watches activate/deactivate/switch/focus events;
+      runtime state → Quickshell FileView updates the bar in one frame
 - [x] `omarime.indicator` bar widget (中/A, left-click toggle, right-click settings,
-      per-program focus refresh + 2s fallback poll)
+      event-driven per-program refresh + 30s failure-only fallback)
 - [x] Keep switch feedback bar-only; removed redundant delayed OSD
 - [x] Native `omarime.settings` menu: active state, horizontal/vertical,
       cloud pinyin, QWERTY correction, 13 fuzzy pairs, theme regeneration,
