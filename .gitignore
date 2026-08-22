@@ -3,3 +3,7 @@
 research/apk/
 research/unpacked/
 work/
+
+# compiled eval test binaries (sources are tracked)
+eval/d-flip-exp
+eval/test-weight-persist
