@@ -8,13 +8,15 @@ work/
 eval/d-flip-exp
 eval/test-weight-persist
 
-# build artifacts
+# build directory (dist/ has the committed pre-built addon)
 build/
-dist/
-*.so
-!dist/libomarime-state.so
 
 # language model files (distributed via GitHub Releases)
 *.lm
 *.lm.predict
 *.arpa
+
+# dist/ is tracked (pre-built addon), but ignore anything else dropped in
+dist/*
+!dist/libomarime-state.so
+!dist/omarime-state.conf
