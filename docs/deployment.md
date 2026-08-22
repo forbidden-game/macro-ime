@@ -140,7 +140,10 @@ git tag vX.Y.Z && git push origin main vX.Y.Z
 gh release upload vX.Y.Z zh_CN.lm zh_CN.lm.predict --repo forbidden-game/omarime
 
 # 5. 取消 draft (CI 建的是 draft, 防止未验证 tag 直接发布)
-gh api repos/forbidden-game/omarime/releases/tags/vX.Y.Z -X PATCH -f draft=false
+#    注意: REST API 按 tag 查询不到 draft (404), 必须用数字 id:
+NUM_ID=$(gh api repos/forbidden-game/omarime/releases \
+  --jq '.[] | select(.tag_name=="vX.Y.Z") | .id')
+gh api repos/forbidden-game/omarime/releases/$NUM_ID -X PATCH -f draft=false
 ```
 
 用户侧更新：`git pull && ./install.sh`——install.sh 按 `VERSION` 拉取对应
