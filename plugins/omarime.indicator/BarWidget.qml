@@ -113,10 +113,7 @@ BarWidget {
     text: root.imActive ? "中" : "A"
     fontSize: Style.font.caption
     horizontalMargin: 6
-    // Accent while composing so the state reads at a glance; dimmed A for
-    // English mode keeps the widget present but quiet.
-    foreground: root.imActive ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground)
-    dimmed: !root.imActive
+    foreground: root.bar ? root.bar.barForeground : Color.foreground
     tooltipText: root.imActive ? "中文输入法 · 左键切换 · 右键设置" : "英文 · 左键切换 · 右键设置"
     onPressed: function(button) {
       if (button === 2) {
