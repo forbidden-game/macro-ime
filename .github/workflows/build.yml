@@ -14,20 +14,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify pre-built addon
+      - name: Verify pre-built addon (arch + staleness)
         run: |
           test -f dist/libomarime-state.so || {
             echo "ERROR: dist/libomarime-state.so not found"
-            echo "Build it locally: cmake -S engine/omarime-state -B build && cmake --build build && cp build/libomarime-state.so dist/"
+            echo "Build it: cmake -S engine/omarime-state -B build && cmake --build build && cp build/libomarime-state.so dist/"
             exit 1
           }
           file dist/libomarime-state.so
           readelf -h dist/libomarime-state.so | grep -q "Shared object"
-          echo "OK: addon is a valid ELF shared object"
+          readelf -h dist/libomarime-state.so | grep -q "X86-64"
+          echo "OK: addon is a valid x86-64 ELF shared object"
+          # Staleness: the committed .so must have been built from the
+          # currently committed source (hash recorded at build time).
+          test -f dist/libomarime-state.so.src || {
+            echo "ERROR: dist/libomarime-state.so.src (source hash sidecar) missing"
+            echo "Regenerate: sha256sum engine/omarime-state/omarime-state.cpp | cut -d' ' -f1 > dist/libomarime-state.so.src"
+            exit 1
+          }
+          recorded=$(tr -d '[:space:]' < dist/libomarime-state.so.src)
+          actual=$(sha256sum engine/omarime-state/omarime-state.cpp | cut -d' ' -f1)
+          if [[ "$recorded" != "$actual" ]]; then
+            echo "ERROR: dist/libomarime-state.so is STALE — engine/omarime-state/omarime-state.cpp changed since the addon was built."
+            echo "Rebuild: cmake -S engine/omarime-state -B build && cmake --build build && cp build/libomarime-state.so dist/"
+            echo "  then regenerate the sidecar (sha256sum ... > dist/libomarime-state.so.src)"
+            exit 1
+          fi
+          echo "OK: addon matches current source (staleness check passed)"
 
       - name: Verify repo structure
         run: |
-          for f in install.sh bin/omarime-config \
+          for f in install.sh VERSION \
+                    bin/omarime-config \
                     themes/omarime-theme themes/hook-theme-set.sh \
                     plugins/omarime.indicator/manifest.json \
                     plugins/omarime.settings/manifest.json; do
@@ -39,6 +57,35 @@ jobs:
         run: |
           bash -n install.sh
           echo "OK: install.sh syntax valid"
+
+      - name: shellcheck install.sh
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck install.sh
+          echo "OK: shellcheck clean"
+
+      - name: Smoke test install.sh (executable paths)
+        run: |
+          # 1. --help must run and exit 0
+          ./install.sh --help > /dev/null
+          echo "OK: --help"
+          # 2. Unknown option must be rejected
+          if ./install.sh --bogus-option 2> /dev/null; then
+            echo "ERROR: unknown option was not rejected"; exit 1
+          fi
+          echo "OK: unknown option rejected"
+          # 3. Regression guard: every step function must be DEFINED before the
+          #    main section (v0.1.0 shipped with call-before-definition -> exit 127).
+          head -n "$(grep -n '^# --- main' install.sh | cut -d: -f1)" install.sh > /tmp/defs.sh
+          bash -c 'source /tmp/defs.sh
+          for f in require_commands load_version on_error service_running stop_fcitx \
+                   restore_file backup_file_once undo prepare_fcitx_config \
+                   gh_release_digest verify_lm_integrity install_language_model \
+                   install_addon build_state_addon_to install_runtime \
+                   install_plugins apply_and_activate; do
+            declare -F "$f" > /dev/null || { echo "MISSING before main: $f"; exit 1; }
+          done'
+          echo "OK: all step functions defined before main"
 
   # Release: triggered by git tag (e.g. v1.0.0)
   release:

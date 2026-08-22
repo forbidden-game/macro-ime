@@ -8,7 +8,7 @@ work/
 eval/d-flip-exp
 eval/test-weight-persist
 
-# build directory (dist/ has the committed pre-built addon)
+# build directory (dist/ holds the committed pre-built addon)
 build/
 
 # language model files (distributed via GitHub Releases)
@@ -16,7 +16,7 @@ build/
 *.lm.predict
 *.arpa
 
-# dist/ is tracked (pre-built addon), but ignore anything else dropped in
+# dist/ is tracked (pre-built addon + source sidecar)
 dist/*
 !dist/libomarime-state.so
-!dist/omarime-state.conf
+!dist/libomarime-state.so.src

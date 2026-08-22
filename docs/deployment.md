@@ -55,33 +55,40 @@ fcitx5 启动后，pinyin addon 在 `~/.local/share/omarime/lib/` 找到
 ### 首次安装
 
 ```bash
+gh auth login            # 一次性：私有 repo 下载 LM 需要认证
 git clone https://github.com/forbidden-game/omarime.git
 cd omarime
 ./install.sh
 ```
 
 install.sh 自动：
-1. 检查依赖 (fcitx5 >= 5.1, omarchy, omarchy-shell)
+1. 检查依赖 (fcitx5, omarchy, omarchy-shell；预编译 addon 在 repo 里时无需编译工具链)
 2. 备份现有 fcitx5 配置
-3. 下载 LM (从 GitHub Release, ~463MB) 到 `~/.local/share/omarime/lib/`
-4. 安装预编译 addon (从 repo dist/ 或 GitHub Release)
+3. 下载 LM (从 pinned GitHub Release, ~463MB, sha256 校验) 到 `~/.local/share/omarime/lib/`
+4. 安装预编译 addon (repo `dist/`，缺失时回退本地 cmake 编译)
 5. 安装主题 + 插件 + 配置后端
 6. 设置 `LIBIME_MODEL_DIRS` + `FCITX_ADDON_DIRS` (systemd drop-in)
-7. 应用主题 + 激活插件 + 重启 shell
+7. 应用主题 + 激活插件 + 重启 fcitx5/shell
 
 ### 离线安装
 
-```bash
-# 在有网络的机器上下载 LM
-curl -LO <github-release-url>/zh_CN.lm
-curl -LO <github-release-url>/zh_CN.lm.predict
+repo 是私有的，裸 `curl` 会 404——用 `gh`（自动带认证）下载：
 
-# 在目标机器上
+```bash
+# 在有网络的机器上 (需 gh auth login)
+VERSION=$(cat VERSION)   # 例如 0.1.0
+gh release download "v${VERSION}" --repo forbidden-game/omarime \
+  --pattern 'zh_CN.lm' --pattern 'zh_CN.lm.predict' --dir /tmp/omarime-lm
+
+# 在目标机器上 (U 盘/内网传输 /tmp/omarime-lm/)
 ./install.sh --lm-file /path/to/zh_CN.lm
 # 或放到 repo 的 dist/ 目录
 cp zh_CN.lm zh_CN.lm.predict dist/
 ./install.sh --offline
 ```
+
+`--lm-file` 的 predict 文件约定为 `<LM文件>.predict`，缺失时只降级
+cloud-pinyin 预测（安装会给出 warning）。
 
 ### 跳过 LM (只装 UI)
 
@@ -108,9 +115,37 @@ LM 不随代码更新。更新流程：
 
 ## CI / 发布
 
-- **push to main**: 构建 addon → upload artifact
-- **git tag v\*.\*.\***: 构建 addon → 创建 GitHub Release (draft)
-- LM 文件手动上传到 Release (太大不适合 CI 自动处理)
+### 日常 CI (push to main)
+
+- 校验 `dist/libomarime-state.so`：x86-64 ELF + **与源码同步**（源码 hash sidecar）
+- `bash -n` + `shellcheck` + install.sh 可执行 smoke test
+
+### 发版流程 (tag 触发)
+
+```bash
+# 1. 若改了 engine/omarime-state/ 源码，先重新构建 addon + 刷新 sidecar
+cmake -S engine/omarime-state -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+cp build/libomarime-state.so dist/
+sha256sum engine/omarime-state/omarime-state.cpp | cut -d' ' -f1 > dist/libomarime-state.so.src
+
+# 2. 升级 VERSION 文件 (决定 install.sh 拉取哪个 release 的 LM/addon)
+echo "0.1.1" > VERSION
+
+# 3. 提交 + 打 tag (CI 验证通过后自动创建 DRAFT release, 附 .so)
+git add -A && git commit -m "release: vX.Y.Z"
+git tag vX.Y.Z && git push origin main vX.Y.Z
+
+# 4. 手动上传 LM assets 到该 release (463MB 不适合 CI)
+gh release upload vX.Y.Z zh_CN.lm zh_CN.lm.predict --repo forbidden-game/omarime
+
+# 5. 取消 draft (CI 建的是 draft, 防止未验证 tag 直接发布)
+gh api repos/forbidden-game/omarime/releases/tags/vX.Y.Z -X PATCH -f draft=false
+```
+
+用户侧更新：`git pull && ./install.sh`——install.sh 按 `VERSION` 拉取对应
+release 的 LM，并做 sha256 校验。已安装的 LM 会跳过（除非删除旧文件或
+升级 VERSION 后删除 `~/.local/share/omarime/lib/zh_CN.lm*`）。
 
 ## 依赖声明
 

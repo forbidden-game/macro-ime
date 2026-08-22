@@ -17,8 +17,9 @@ E6 评测准确率 89.6%（stock 81.0%）；主题、bar 指示器和设置面�
 ## 安装
 
 ```bash
+gh auth login            # 一次性：从私有 repo 下载 LM 需要认证
 git clone git@github.com:forbidden-game/omarime.git && cd omarime
-./install.sh          # 全自动：LM 下载 + addon + 主题 + 插件
+./install.sh          # 全自动：LM 下载 (sha256 校验) + addon + 主题 + 插件
 ./install.sh --undo   # 完整回滚
 ```
 
