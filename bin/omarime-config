@@ -14,7 +14,6 @@
 # Keys:
 #   im.active            bool    current input state (set runs fcitx5-remote -o/-c)
 #   candidates.vertical  bool    classicui.conf Vertical Candidate List
-#   cloud.enabled        bool    pinyin.conf CloudPinyinEnabled
 #   context.inter        bool    pinyin.conf KeepCurrentContext
 #                                (last 2 committed words feed next decode)
 #   correction           enum    pinyin.conf Correction (None | QWERTY)
@@ -120,7 +119,6 @@ get_value() {
   case $1 in
     im.active) [[ $(fcitx5-remote --check 2>/dev/null || echo 0) == 2 ]] && echo true || echo false ;;
     candidates.vertical) [[ $(ini_get "$UICONF" "Vertical Candidate List" False) =~ ^[Tt]rue$ ]] && echo true || echo false ;;
-    cloud.enabled) [[ $(ini_get "$PYCONF" CloudPinyinEnabled False) =~ True ]] && echo true || echo false ;;
     context.inter) [[ $(ini_get "$PYCONF" KeepCurrentContext True) =~ ^[Tt]rue$ ]] && echo true || echo false ;;
     correction) ini_get "$PYCONF" Correction None ;;
     fuzzy.*)
@@ -146,10 +144,6 @@ set_value() {
       [[ $value == true || $value == false ]] || die "candidates.vertical: bool"
       ini=$([ "$value" == true ] && echo True || echo False)
       set_addon_value classicui "$UICONF" "Vertical Candidate List" "$ini" ;;
-    cloud.enabled)
-      [[ $value == true || $value == false ]] || die "cloud.enabled: bool"
-      ini=$([ "$value" == true ] && echo True || echo False)
-      set_addon_value pinyin "$PYCONF" CloudPinyinEnabled "$ini" ;;
     context.inter)
       [[ $value == true || $value == false ]] || die "context.inter: bool"
       ini=$([ "$value" == true ] && echo True || echo False)
@@ -185,7 +179,6 @@ case ${1:-} in
     jq -n \
       --argjson imActive "$(get_value im.active)" \
       --argjson vertical "$(get_value candidates.vertical)" \
-      --argjson cloud "$(get_value cloud.enabled)" \
       --argjson contextInter "$(get_value context.inter)" \
       --arg correction "$(get_value correction)" \
       --argjson anAng "$(get_value fuzzy.an_ang)" \
@@ -202,7 +195,7 @@ case ${1:-} in
       --argjson vU "$(get_value fuzzy.v_u)" \
       --argjson uOu "$(get_value fuzzy.u_ou)" \
       --argjson userModelWeight "$(get_value usermodel.weight)" \
-      '{imActive:$imActive, vertical:$vertical, cloud:$cloud, contextInter:$contextInter, correction:$correction,
+      '{imActive:$imActive, vertical:$vertical, contextInter:$contextInter, correction:$correction,
         fuzzy:{anAng:$anAng, enEng:$enEng, inIng:$inIng, ianIang:$ianIang,
                uanUang:$uanUang, cCh:$cCh, sSh:$sSh, zZh:$zZh, lN:$lN,
                fH:$fH, lR:$lR, vU:$vU, uOu:$uOu},

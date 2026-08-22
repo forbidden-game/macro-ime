@@ -44,7 +44,7 @@ LM 通过 `LIBIME_MODEL_DIRS` 环境变量加载，不修改系统文件。
 | `themes/` | 从当前 Omarchy 主题生成 fcitx5 classicui SVG 主题；theme-set 自动跟随 |
 | `engine/omarime-state/` | fcitx5 事件 addon；将激活、停用、切换与焦点事件写入 runtime state |
 | `plugins/omarime.indicator/` | FileView 驱动的 bar 中/A 状态；左键切换、右键设置 |
-| `plugins/omarime.settings/` | 云拼音、纠错、横竖排、13 组模糊音、主题重生成、用户词典重置 |
+| `plugins/omarime.settings/` | 纠错、横竖排、13 组模糊音、主题重生成、用户词典重置 |
 | `bin/omarime-config` | 设置面板后端；通过 Controller1.SetConfig 原子更新内存与文件 |
 | `docs/` | 引擎部署、实验记录与研究结论 |
 

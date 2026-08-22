@@ -64,7 +64,7 @@ a beautiful native UI.**
 | Language model | **Ours**: trigram trained with **kenlm** on modern corpora → ARPA → `libime_slm_build_binary` | the single highest-leverage quality lever; nobody ships a fresh one | octagram grammar for rime (still inside rime's weak adaptation loop) |
 | Dictionaries | **Ours**: curated merge (zhwiki titles, THUOCL, open Sogou-cell conversions, Jun Da freq) → `libime_pinyindict` | dict quality = coverage; LM quality = ranking | rime-ice dicts (good data, wrong engine) |
 | User adaptation | libime **UserLanguageModel + HistoryBigram**, tuned & verified on | the "越用越好用" property, built-in | rime userdb (single-word boost only) |
-| Cloud (opt-in) | fcitx5 cloudpinyin addon, **off by default** | privacy-first; optional boost | — |
+| Cloud pinyin | **removed** (settings toggle + `omarime-config cloud.enabled` dropped; upstream addon stays off) | privacy-first; no need for it | — |
 | Candidate UI | **kimpanel → Quickshell plugin** in omarchy-shell | native Omarchy look; nobody has built this for Hyprland (verified) | classicui themes (fallback only) |
 | Indicator/toggle | event addon + bar-widget + `Ctrl+Space` + per-program memory (`ShareInputState=PerProgram`) | immediate, native, user-selected hotkey | polling-only indicator |
 | Packaging | install.sh (idempotent, backup-first) + AUR where possible | out-of-box | — |
@@ -213,7 +213,7 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 
 1. ~~rime-ice vs wanxiang~~ → moot (engine pivoted to libime)
 2. 双拼 in Phase 1 or later? (config-only, cheap — default: include Xiaohe)
-3. Cloud pinyin: keep OFF by default? (recommend OFF)
+3. ~~Cloud pinyin: keep OFF by default?~~ → resolved: feature removed from omarime
 4. Phase order OK? (1 → 2 → 3 → 4; Phase 2 is the long pole)
 5. License for omarime itself: MIT? (data files keep their own licenses)
 

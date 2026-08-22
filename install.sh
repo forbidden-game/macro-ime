@@ -386,7 +386,7 @@ prepare_language_model() {
     LM_SRC="$LM_FILE"
     LM_PREDICT_SRC="${LM_FILE}.predict"
     if [[ ! -f "$LM_PREDICT_SRC" ]]; then
-      note "warning: no ${LM_PREDICT_FILENAME} next to $LM_FILE — cloud-pinyin prediction will be off"
+      note "warning: no ${LM_PREDICT_FILENAME} next to $LM_FILE — prediction will be off"
       LM_PREDICT_SRC=""
     elif [[ $(stat -c%s "$LM_PREDICT_SRC") -lt 1000000 ]]; then
       echo "omarime: ${LM_PREDICT_SRC} is only $(stat -c%s "$LM_PREDICT_SRC") bytes (expected ~3.9MB); looks truncated" >&2
@@ -751,6 +751,6 @@ echo "  language model   ${OMARIME_LM_DIR}/${LM_FILENAME} (via LIBIME_MODEL_DIRS
 echo "                   tracked in ${MANIFEST} (LM release ${LM_MANIFEST_REL:-none})"
 echo "  candidate window follows the active omarchy theme"
 echo "  bar indicator    event-driven 中/EN · left-click toggle · right-click settings"
-echo "  settings panel   fuzzy pairs, correction, vertical list, cloud pinyin,"
+echo "  settings panel   fuzzy pairs, correction, vertical list,"
 echo "                   user-dict reset — atomic DBus config writes"
 echo "  rollback         $0 --undo"

@@ -210,7 +210,7 @@ State PinyinContext::state() const {
 |---|---|---|
 | **上屏提交（正常路径）** | `pinyin.cpp:244-245` `initPredict` | `if (keepCurrentContext) appendContextWordsWithPinyin(selectedWordsWithPinyin)` — 把刚上屏的词加入句间上下文（主入口） |
 | 预测中 | `pinyin.cpp:274-275` `updatePredict` | `setContextWordsWithPinyin(predictWords_)` — 把预测词设为上下文 |
-| 云拼音提交 | `pinyin.cpp:2584-2585` `cloudPinyinSelected` | `appendContextWordsWithPinyin(words)`（云拼音默认关，不走） |
+| 云拼音提交 | `pinyin.cpp:2584-2585` `cloudPinyinSelected` | `appendContextWordsWithPinyin(words)`（omarime 已移除云拼音入口，恒不走） |
 | 清场 | `pinyin.cpp:1214,1863,2226,2334` | `clearContextWords()` |
 
 `appendContextWordsWithPinyin`（`pinyincontext.cpp:1086`）只保留**最近 2 个词**

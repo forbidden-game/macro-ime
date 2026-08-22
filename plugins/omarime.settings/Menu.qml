@@ -26,7 +26,6 @@ Item {
   // ---- state model, populated by omarime-config get-all --json
     property bool imActive: false
   property bool vertical: false
-  property bool cloud: false
   property string correction: "None"
   property var fuzzy: ({})
   property bool contextInter: true
@@ -167,15 +166,6 @@ Item {
           checked: root.vertical
           enabled: !root.busy
           onClicked: root.apply("candidates.vertical", !root.vertical ? "true" : "false")
-        }
-
-        Toggle {
-          width: parent.width
-          label: "云拼音"
-          description: "联网补充首候选 · 隐私优先，默认关"
-          checked: root.cloud
-          enabled: !root.busy
-          onClicked: root.apply("cloud.enabled", !root.cloud ? "true" : "false")
         }
 
         // correction segmented
@@ -404,7 +394,6 @@ Item {
           const s = JSON.parse(text)
           root.imActive = s.imActive === true
           root.vertical = s.vertical === true
-          root.cloud = s.cloud === true
           root.correction = String(s.correction || "None")
           root.fuzzy = s.fuzzy || {}
           root.contextInter = s.contextInter !== false
