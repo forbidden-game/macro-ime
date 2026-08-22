@@ -15,19 +15,70 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DST="${HOME}/.local/share/omarime/themes"
 HOOK_DST="${HOME}/.config/omarchy/hooks/theme-set.d/omarime.sh"
 UI_CONF="${HOME}/.config/fcitx5/conf/classicui.conf"
+CORE_CONF="${HOME}/.config/fcitx5/config"
+BACKUP_DIR="${HOME}/.local/share/omarime/backup"
+
+restore_file() {
+  local backup=$1 destination=$2
+  if [[ -f "$BACKUP_DIR/$backup" ]]; then
+    mkdir -p "$(dirname "$destination")"
+    cp "$BACKUP_DIR/$backup" "$destination"
+  elif [[ -f "$BACKUP_DIR/$backup.missing" ]]; then
+    rm -f "$destination"
+  fi
+}
 
 if [[ ${1:-} == "--undo" ]]; then
-  rm -rf "$DST" "$HOOK_DST"
-  if systemctl --user is-active --quiet omarchy-fcitx5.service; then
-    systemctl --user stop omarchy-fcitx5.service
-    sed -i '/^Theme=omarime$/d;/^DarkTheme=omarime$/d' "$UI_CONF" 2>/dev/null || true
-    systemctl --user start omarchy-fcitx5.service
-  else
-    sed -i '/^Theme=omarime$/d;/^DarkTheme=omarime$/d' "$UI_CONF" 2>/dev/null || true
-  fi
-  echo "omarime themes: removed (fcitx5 back to default theme)"
+  was_active=0
+  case $(systemctl --user is-active omarchy-fcitx5.service 2>/dev/null || true) in
+    active|activating|reloading) was_active=1 ;;
+  esac
+  pgrep -x fcitx5 >/dev/null 2>&1 && was_active=1
+  systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
+  pkill -x fcitx5 2>/dev/null || true
+  for _ in {1..20}; do pgrep -x fcitx5 >/dev/null || break; sleep 0.05; done
+  pgrep -x fcitx5 >/dev/null && { echo "fcitx5 did not stop" >&2; exit 1; }
+  restore_file classicui.conf "$UI_CONF"
+  restore_file config "$CORE_CONF"
+  systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+  (( was_active )) && systemctl --user start omarchy-fcitx5.service
+  rm -rf "$DST" "$HOOK_DST" "$HOME/.local/share/fcitx5/themes/omarime"
+  echo "omarime themes: removed; fcitx5 config restored to its pre-install state"
   exit 0
 fi
+
+# Backup only once across reinstalls, after stopping fcitx5 so its memory state
+# cannot overwrite the copy. Also force preedit into our panel, not app boxes.
+was_active=0
+case $(systemctl --user is-active omarchy-fcitx5.service 2>/dev/null || true) in
+  active|activating|reloading) was_active=1 ;;
+esac
+pgrep -x fcitx5 >/dev/null 2>&1 && was_active=1
+systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
+pkill -x fcitx5 2>/dev/null || true
+for _ in {1..20}; do pgrep -x fcitx5 >/dev/null || break; sleep 0.05; done
+pgrep -x fcitx5 >/dev/null && { echo "fcitx5 did not stop" >&2; exit 1; }
+mkdir -p "$BACKUP_DIR"
+[[ -e "$BACKUP_DIR/classicui.conf" || -e "$BACKUP_DIR/classicui.conf.missing" ]] || {
+  [[ -f $UI_CONF ]] && cp "$UI_CONF" "$BACKUP_DIR/classicui.conf" || touch "$BACKUP_DIR/classicui.conf.missing"
+}
+[[ -e "$BACKUP_DIR/config" || -e "$BACKUP_DIR/config.missing" ]] || {
+  [[ -f $CORE_CONF ]] && cp "$CORE_CONF" "$BACKUP_DIR/config" || touch "$BACKUP_DIR/config.missing"
+}
+mkdir -p "$(dirname "$CORE_CONF")"
+[[ -f $CORE_CONF ]] || : >"$CORE_CONF"
+tmp=$(mktemp)
+if grep -q '^PreeditEnabledByDefault=' "$CORE_CONF"; then
+  sed 's/^PreeditEnabledByDefault=.*/PreeditEnabledByDefault=False/' "$CORE_CONF" >"$tmp"
+elif grep -q '^\[Behavior\]$' "$CORE_CONF"; then
+  sed '/^\[Behavior\]$/a PreeditEnabledByDefault=False' "$CORE_CONF" >"$tmp"
+else
+  cat "$CORE_CONF" >"$tmp"
+  printf '\n[Behavior]\nPreeditEnabledByDefault=False\n' >>"$tmp"
+fi
+mv "$tmp" "$CORE_CONF"
+systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+(( was_active )) && systemctl --user start omarchy-fcitx5.service
 
 mkdir -p "$DST"
 cp "$SRC/omarime-theme" "$SRC/hook-theme-set.sh" "$DST/"

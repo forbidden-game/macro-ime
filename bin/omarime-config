@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+# omarime-config — safely read/write persistent fcitx5 settings.
+#
+# Persistent addon values go through Controller1.SetConfig, which updates
+# fcitx5's memory and its config file atomically (the same path as
+# fcitx5-configtool). A stop → edit → start fallback covers unavailable DBus.
+#
+# Usage:
+#   omarime-config get-all --json
+#   omarime-config get <key>
+#   omarime-config set <key> <value>      # values: true/false, None/QWERTY
+#   omarime-config action theme-regenerate | userdict-reset
+#
+# Keys:
+#   im.active            bool    current input state (set runs fcitx5-remote -o/-c)
+#   candidates.vertical  bool    classicui.conf Vertical Candidate List
+#   cloud.enabled        bool    pinyin.conf CloudPinyinEnabled
+#   correction           enum    pinyin.conf Correction (None | QWERTY)
+#   fuzzy.<pair>         bool    pinyin.conf [Fuzzy] pairs:
+#                                an_ang en_eng in_ing ian_iang uan_uang c_ch
+#                                s_sh z_zh l_n f_h l_r v_u u_ou
+set -euo pipefail
+
+CONF_DIR="${HOME}/.config/fcitx5/conf"
+PYCONF="${CONF_DIR}/pinyin.conf"
+UICONF="${CONF_DIR}/classicui.conf"
+OMARIME_HOME="${HOME}/.local/share/omarime"
+
+die() { echo "omarime-config: $*" >&2; exit 1; }
+
+ini_get() { # ini_get <file> <key> <default>
+  local v
+  v=$(sed -n "s/^$2[[:space:]]*=[[:space:]]*//p" "$1" 2>/dev/null | tail -1)
+  echo "${v:-$3}"
+}
+
+ini_set() { # ini_set <file> <key> <value>
+  local file=$1 key=$2 value=$3 tmp
+  [[ -f $file ]] || die "missing $file"
+  if grep -q "^${key}[[:space:]]*=" "$file"; then
+    tmp=$(mktemp)
+    sed "s|^${key}[[:space:]]*=.*|${key}=${value}|" "$file" >"$tmp"
+    mv "$tmp" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >>"$file"
+  fi
+}
+
+stop_fcitx() {
+  systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
+  # Clean up legacy/D-Bus-autostarted instances outside the unit cgroup.
+  pkill -x fcitx5 2>/dev/null || true
+  for _ in {1..20}; do pgrep -x fcitx5 >/dev/null || return 0; sleep 0.05; done
+  die "fcitx5 did not stop"
+}
+
+restart_with_edit() { # restart_with_edit <file> <key> <value>
+  local file=$1 key=$2 value=$3
+  stop_fcitx
+  ini_set "$file" "$key" "$value"
+  systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+  systemctl --user start omarchy-fcitx5.service
+}
+
+set_addon_value() { # set_addon_value <addon> <file> <key> <value> [group]
+  local addon=$1 file=$2 key=$3 value=$4 group=${5:-}
+  if [[ -n $group ]]; then
+    if busctl --user call org.fcitx.Fcitx5 /controller \
+        org.fcitx.Fcitx.Controller1 SetConfig sv \
+        "fcitx://config/addon/$addon" 'a{sv}' 1 "$group" 'a{sv}' 1 \
+        "$key" s "$value" >/dev/null 2>&1; then
+      return 0
+    fi
+  elif busctl --user call org.fcitx.Fcitx5 /controller \
+      org.fcitx.Fcitx.Controller1 SetConfig sv \
+      "fcitx://config/addon/$addon" 'a{sv}' 1 "$key" s "$value" \
+      >/dev/null 2>&1; then
+    return 0
+  fi
+  restart_with_edit "$file" "$key" "$value"
+}
+
+fuzzy_ini_key() {
+  case $1 in
+    an_ang) echo AN_ANG ;; en_eng) echo EN_ENG ;; in_ing) echo IN_ING ;;
+    ian_iang) echo IAN_IANG ;; uan_uang) echo UAN_UANG ;; u_ou) echo U_OU ;;
+    c_ch) echo C_CH ;; s_sh) echo S_SH ;; z_zh) echo Z_ZH ;;
+    l_n) echo L_N ;; f_h) echo F_H ;; l_r) echo L_R ;; v_u) echo V_U ;;
+    *) return 1 ;;
+  esac
+}
+
+get_value() {
+  case $1 in
+    im.active) [[ $(fcitx5-remote --check 2>/dev/null || echo 0) == 2 ]] && echo true || echo false ;;
+    candidates.vertical) [[ $(ini_get "$UICONF" "Vertical Candidate List" False) =~ ^[Tt]rue$ ]] && echo true || echo false ;;
+    cloud.enabled) [[ $(ini_get "$PYCONF" CloudPinyinEnabled False) =~ True ]] && echo true || echo false ;;
+    correction) ini_get "$PYCONF" Correction None ;;
+    fuzzy.*)
+      local pair=${1#fuzzy.} k
+      k=$(fuzzy_ini_key "$pair") || die "unknown fuzzy pair: $pair"
+      [[ $(ini_get "$PYCONF" "$k" False) =~ True ]] && echo true || echo false ;;
+    *) die "unknown key: $1" ;;
+  esac
+}
+
+set_value() {
+  local key=$1 value=$2 ini
+  case $key in
+    im.active)
+      case $value in
+        true) fcitx5-remote -o >/dev/null ;;
+        false) fcitx5-remote -c >/dev/null ;;
+        toggle) fcitx5-remote -t >/dev/null ;;
+        *) die "im.active: use true|false|toggle" ;;
+      esac ;;
+    candidates.vertical)
+      [[ $value == true || $value == false ]] || die "candidates.vertical: bool"
+      ini=$([ "$value" == true ] && echo True || echo False)
+      set_addon_value classicui "$UICONF" "Vertical Candidate List" "$ini" ;;
+    cloud.enabled)
+      [[ $value == true || $value == false ]] || die "cloud.enabled: bool"
+      ini=$([ "$value" == true ] && echo True || echo False)
+      set_addon_value pinyin "$PYCONF" CloudPinyinEnabled "$ini" ;;
+    correction)
+      [[ $value == None || $value == QWERTY ]] || die "correction: None|QWERTY"
+      set_addon_value pinyin "$PYCONF" Correction "$value" Fuzzy ;;
+    fuzzy.*)
+      local pair=${key#fuzzy.} k ini
+      k=$(fuzzy_ini_key "$pair") || die "unknown fuzzy pair: $pair"
+      [[ $value == true || $value == false ]] || die "fuzzy: bool"
+      ini=$([ "$value" == true ] && echo True || echo False)
+      set_addon_value pinyin "$PYCONF" "$k" "$ini" Fuzzy ;;
+    *) die "unknown key: $key" ;;
+  esac
+}
+
+[[ -f $PYCONF ]] || die "no $PYCONF (is fcitx5-chinese-addons installed?)"
+
+case ${1:-} in
+  get)
+    [[ $# -eq 2 ]] || die "get <key>"
+    get_value "$2" ;;
+  set)
+    [[ $# -eq 3 ]] || die "set <key> <value>"
+    set_value "$2" "$3"
+    get_value "$2" ;;
+  get-all)
+    jq -n \
+      --argjson imActive "$(get_value im.active)" \
+      --argjson vertical "$(get_value candidates.vertical)" \
+      --argjson cloud "$(get_value cloud.enabled)" \
+      --arg correction "$(get_value correction)" \
+      --argjson anAng "$(get_value fuzzy.an_ang)" \
+      --argjson enEng "$(get_value fuzzy.en_eng)" \
+      --argjson inIng "$(get_value fuzzy.in_ing)" \
+      --argjson ianIang "$(get_value fuzzy.ian_iang)" \
+      --argjson uanUang "$(get_value fuzzy.uan_uang)" \
+      --argjson cCh "$(get_value fuzzy.c_ch)" \
+      --argjson sSh "$(get_value fuzzy.s_sh)" \
+      --argjson zZh "$(get_value fuzzy.z_zh)" \
+      --argjson lN "$(get_value fuzzy.l_n)" \
+      --argjson fH "$(get_value fuzzy.f_h)" \
+      --argjson lR "$(get_value fuzzy.l_r)" \
+      --argjson vU "$(get_value fuzzy.v_u)" \
+      --argjson uOu "$(get_value fuzzy.u_ou)" \
+      '{imActive:$imActive, vertical:$vertical, cloud:$cloud, correction:$correction,
+        fuzzy:{anAng:$anAng, enEng:$enEng, inIng:$inIng, ianIang:$ianIang,
+               uanUang:$uanUang, cCh:$cCh, sSh:$sSh, zZh:$zZh, lN:$lN,
+               fH:$fH, lR:$lR, vU:$vU, uOu:$uOu}}' ;;
+  action)
+    case ${2:-} in
+      theme-regenerate)
+        exec "${OMARIME_HOME}/themes/omarime-theme" -q ;;
+      userdict-reset)
+        stop_fcitx
+        rm -f "${HOME}/.local/share/fcitx5/pinyin/user.dict" \
+              "${HOME}/.local/share/fcitx5/pinyin/user.history"
+        systemctl --user start omarchy-fcitx5.service
+        echo reset-ok ;;
+      *) die "action: theme-regenerate | userdict-reset" ;;
+    esac ;;
+  *)
+    grep '^#' "$0" | sed 's/^# \?//' | head -20
+    exit 1 ;;
+esac

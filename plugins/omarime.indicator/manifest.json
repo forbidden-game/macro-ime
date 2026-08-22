@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "omarime.indicator",
+  "name": "omarime IME indicator",
+  "version": "0.1.0",
+  "author": "omarime",
+  "description": "中/EN input method state, click toggles",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "IME indicator (omarime)",
+    "description": "Chinese/English input method state, click toggles",
+    "category": "Input",
+    "allowMultiple": false
+  }
+}

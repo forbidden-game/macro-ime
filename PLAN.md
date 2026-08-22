@@ -111,8 +111,10 @@ omarime/
 │   └── eval.sh               # CER/top-1 on eval set, old-LM vs omarime-LM
 ├── engine/                   # fcitx5 config layer, fuzzy presets, hotkeys
 ├── hypr/                     # bindings snippet
+├── bin/omarime-config        # live fcitx5 settings backend
 ├── plugins/
-│   ├── omarime.indicator/    # bar-widget 中/EN (Phase 3)
+│   ├── omarime.indicator/    # bar-widget 中/A + toggle/OSD (Phase 3)
+│   ├── omarime.settings/     # native settings menu (Phase 3)
 │   └── omarime.candidate/    # kimpanel Quickshell overlay (Phase 4)
 ├── themes/                   # classicui theme generator + theme-set hook
 ├── research/apk/             # Gboard APK staging (gitignored, never commit)
@@ -169,8 +171,12 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
       font from fc-match; recipe = omarchy popup: bg fill + accent border;
       preedit in panel via PreeditEnabledByDefault=False; verified on
       retro-82 dark + catppuccin-latte light, horizontal + vertical)
-- [ ] `omarime.indicator` bar widget (中/EN, click-toggle, schema tooltip)
-- [ ] Optional OSD toast on switch
+- [x] `omarime.indicator` bar widget (中/A, left-click toggle, right-click settings,
+      per-program focus refresh + 2s fallback poll)
+- [x] OSD toast on switch (direct `omarchy-shell` IPC, ~40ms dispatch)
+- [x] Native `omarime.settings` menu: active state, horizontal/vertical,
+      cloud pinyin, QWERTY correction, 13 fuzzy pairs, theme regeneration,
+      user-dictionary reset; atomic `Controller1.SetConfig` writes
 
 ### Phase 4 — Native candidate window (1–2 weeks)
 - [ ] kimpanel spike: Quickshell DBus listener owns `org.kde.kimpanel.inputmethod`;

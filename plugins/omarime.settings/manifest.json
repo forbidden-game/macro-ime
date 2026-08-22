@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "omarime.settings",
+  "name": "omarime settings",
+  "version": "0.1.0",
+  "author": "omarime",
+  "description": "中文输入法设置面板",
+  "kinds": [
+    "menu"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "menu": "Menu.qml"
+  }
+}

@@ -40,12 +40,12 @@ systemctl --user start omarchy-fcitx5.service
   `InnerShort` `PartialFinal`
 - 模糊音对(**默认全 False**): `AN_ANG` `EN_ENG` `IN_ING` `IAN_IANG`
   `UAN_UANG` `C_CH` `S_SH` `Z_ZH` `L_N` `F_H` `L_R` `V_U` `U_OU`
-- `Correction`: None/Qwerty — 键盘邻键纠错, 桌面默认 None
+- `Correction`: None/QWERTY — 键盘邻键纠错, 桌面默认 None
 
 ### 当前用户决策 (2026-02-22)
 
 - 模糊音对: **全部关闭** (E6 准确率足够, 正确拼音无需模糊, 开了反而添噪)
-- `Correction=Qwerty`: **保留** (解决"打错字母从头再来")
+- `Correction=QWERTY`: **保留** (解决"打错字母从头再来")
 - 其余基础辅助: 默认保留
 - 切换热键: 维持 Ctrl+Space (用户明确拒绝 Super+Space)
 

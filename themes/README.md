@@ -25,10 +25,19 @@ the whole composition lives in one themed surface.
 
 ## Install
 
+Full product (recommended):
+
 ```bash
-cd ~/work/projects/omarchy_plugins/omarime/themes
-./install.sh            # generator → ~/.local/share/omarime, hook → theme-set.d
-./install.sh --undo     # full rollback
+cd ~/work/projects/omarchy_plugins/omarime
+./install.sh            # theme + hook + settings backend + shell plugins
+./install.sh --undo     # restore pre-install fcitx5 config and remove everything
+```
+
+Theme-only development install:
+
+```bash
+cd themes
+./install.sh
 ```
 
 After install, every `omarchy theme set …` regenerates the IME theme
