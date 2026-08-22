@@ -17,13 +17,23 @@ E6 评测准确率 89.6%（stock 81.0%）；主题、bar 指示器和设置面�
 ## 安装
 
 ```bash
-git clone <this-repo> && cd omarime
-./install.sh          # 主题 + hook + 配置后端 + shell 插件
-./install.sh --undo   # 恢复安装前 fcitx5 配置并移除所有文件
+git clone git@github.com:forbidden-game/omarime.git && cd omarime
+./install.sh          # 全自动：LM 下载 + addon + 主题 + 插件
+./install.sh --undo   # 完整回滚
 ```
 
-引擎 E6 的部署与回滚见 [docs/deployment.md](docs/deployment.md)。总安装器不会替换
-系统 `/usr/lib/libime/zh_CN.lm`；语言模型仍按该文档单独部署。
+所有文件安装在用户目录 (`~/.local/share/omarime/`)，**不需要 root**。
+LM 通过 `LIBIME_MODEL_DIRS` 环境变量加载，不修改系统文件。
+
+选项：
+
+```bash
+./install.sh --lm-file /path/to/zh_CN.lm   # 手动指定 LM
+./install.sh --skip-lm                     # 跳过 LM（只装 UI）
+./install.sh --offline                     # 不联网，文件缺失时报错
+```
+
+部署架构详见 [docs/deployment.md](docs/deployment.md)。
 
 ## 已实现组件
 
