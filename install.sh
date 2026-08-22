@@ -6,8 +6,9 @@
 #
 # Options:
 #   --lm-file <path>   path to zh_CN.lm (E6 language model, ~463MB).
-#                      If not provided, downloads from the pinned GitHub
-#                      release (see the VERSION file).
+#                      If not provided, downloads from the newest release
+#                      that carries the model (not per-version re-uploads:
+#                      unchanged models stay on their original release).
 #   --skip-lm          skip LM install (UI only, no engine model).
 #   --offline          do not download; fail if the LM is missing locally.
 #
@@ -252,10 +253,21 @@ load_version() {
 
 # sha256 of a release asset, from GitHub's recorded digest. Empty on failure.
 gh_release_digest() {
-  local name=$1
-  gh api "repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" \
+  local name=$1 release=$2
+  gh api "repos/${GH_REPO}/releases/tags/${release}" \
     --jq ".assets[] | select(.name == \"${name}\") | .digest // \"\" | sub(\"^sha256:\"; \"\")" \
     2>/dev/null || true
+}
+
+# The newest release that actually carries the LM assets. The LM bytes
+# rarely change, and unchanged models are never re-uploaded per release —
+# installs resolve the owning release implicitly. A model update therefore
+# means: upload the new zh_CN.lm to the new release, and installs pick it
+# up automatically (digest differs from the manifest).
+resolve_lm_release() {
+  gh api "repos/${GH_REPO}/releases" --paginate \
+    --jq '.[] | select(any(.assets[]?; .name == "zh_CN.lm")) | .tag_name' \
+    2>/dev/null | head -1
 }
 
 # Strict sha256 check — fail-closed: an unavailable digest is an error, not a
@@ -293,6 +305,7 @@ check_lm_size() {
 LM_SRC=""
 LM_PREDICT_SRC=""
 LM_SOURCE=""          # release | lm-file | dist
+LM_RELEASE=""         # newest release carrying zh_CN.lm (source of truth)
 LM_DL_DIR=""          # temp download dir, kept until commit copies the files
 commit_manifest_only=0  # 1 = files already match this release; just write the manifest
 
@@ -303,38 +316,48 @@ prepare_language_model() {
     return 0
   fi
 
+  # Newest release carrying zh_CN.lm — the source of truth for "current"
+  # model bytes. Empty when gh is unavailable (offline installs rely on
+  # --lm-file / dist and simply skip the release-verified paths).
+  LM_RELEASE="$(resolve_lm_release)"
+  if [[ -z "$LM_RELEASE" ]]; then
+    note "(no LM release resolvable — release-verified paths disabled)"
+  else
+    note "LM assets resolved from release ${LM_RELEASE}"
+  fi
+
   local lm_dest="${OMARIME_LM_DIR}/${LM_FILENAME}"
   local predict_dest="${OMARIME_LM_DIR}/${LM_PREDICT_FILENAME}"
 
-  # --- 1. Already installed and verified against this release? skip.
-  if [[ -f "$MANIFEST" && -f "$lm_dest" ]]; then
+  # --- 1. Already installed and verified against the current LM release?
+  if [[ -f "$MANIFEST" && -f "$lm_dest" && -n "$LM_RELEASE" ]]; then
     local mrel msrc lmh prh
     mrel=$(jq -r '.release // ""' "$MANIFEST" 2>/dev/null || true)
     msrc=$(jq -r '.source // ""' "$MANIFEST" 2>/dev/null || true)
     lmh=$(jq -r '.files["zh_CN.lm"].sha256 // ""' "$MANIFEST" 2>/dev/null || true)
     prh=$(jq -r '.files["zh_CN.lm.predict"].sha256 // ""' "$MANIFEST" 2>/dev/null || true)
-    if [[ "$mrel" == "$RELEASE_TAG" && "$msrc" == "release" && \
+    if [[ "$mrel" == "$LM_RELEASE" && "$msrc" == "release" && \
           "$lmh" == "$(sha256sum "$lm_dest" | cut -d' ' -f1)" && \
           -f "$predict_dest" && "$prh" == "$(sha256sum "$predict_dest" | cut -d' ' -f1)" ]]; then
-      note "LM already installed and verified (release ${RELEASE_TAG})"
+      note "LM already installed and verified (release ${LM_RELEASE})"
       ok "language model in place"
       return 0
     fi
   fi
 
-  # --- 2. Migration: files exist and match this release's digest? Then just
-  #        (re)write the manifest — no 463MB re-download.
-  if [[ -f "$lm_dest" && -f "$predict_dest" ]]; then
+  # --- 2. Migration: files exist and match the current LM release's digest?
+  #        Then just (re)write the manifest — no 463MB re-download.
+  if [[ -f "$lm_dest" && -f "$predict_dest" && -n "$LM_RELEASE" ]]; then
     local rd rp
-    rd=$(gh_release_digest "$LM_FILENAME")
-    rp=$(gh_release_digest "$LM_PREDICT_FILENAME")
+    rd=$(gh_release_digest "$LM_FILENAME" "$LM_RELEASE")
+    rp=$(gh_release_digest "$LM_PREDICT_FILENAME" "$LM_RELEASE")
     if [[ -n "$rd" && \
           "$rd" == "$(sha256sum "$lm_dest" | cut -d' ' -f1)" && \
           "$rp" == "$(sha256sum "$predict_dest" | cut -d' ' -f1)" ]]; then
       commit_manifest_only=1
       LM_SOURCE="release"
-      note "existing LM matches release ${RELEASE_TAG} — just updating the manifest"
-      ok "language model verified against release ${RELEASE_TAG}"
+      note "existing LM matches release ${LM_RELEASE} — just updating the manifest"
+      ok "language model verified against release ${LM_RELEASE}"
       return 0
     fi
   fi
@@ -372,12 +395,17 @@ prepare_language_model() {
       echo "  private release. Run 'gh auth login' first, or use --lm-file <path>." >&2
       return 1
     fi
+    if [[ -z "$LM_RELEASE" ]]; then
+      echo "omarime: cannot resolve a release that carries ${LM_FILENAME}." >&2
+      echo "  Upload the model to a release, or use --lm-file <path>." >&2
+      return 1
+    fi
     LM_DL_DIR=$(mktemp -d)
-    note "downloading language model from release ${RELEASE_TAG} (~463MB)…"
-    gh release download "$RELEASE_TAG" --repo "$GH_REPO" \
+    note "downloading language model from release ${LM_RELEASE} (~463MB)…"
+    gh release download "$LM_RELEASE" --repo "$GH_REPO" \
       --pattern "$LM_FILENAME" --pattern "$LM_PREDICT_FILENAME" --dir "$LM_DL_DIR" \
       2>/dev/null || {
-      echo "omarime: download from ${RELEASE_TAG} failed." >&2
+      echo "omarime: download from ${LM_RELEASE} failed." >&2
       echo "  Check the release exists + your gh auth, or use --lm-file." >&2
       rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1
     }
@@ -390,8 +418,8 @@ prepare_language_model() {
     LM_SOURCE="release"
     # Fail-closed verification against the release's recorded sha256.
     local exp_lm exp_pred
-    exp_lm=$(gh_release_digest "$LM_FILENAME")
-    exp_pred=$(gh_release_digest "$LM_PREDICT_FILENAME")
+    exp_lm=$(gh_release_digest "$LM_FILENAME" "$LM_RELEASE")
+    exp_pred=$(gh_release_digest "$LM_PREDICT_FILENAME" "$LM_RELEASE")
     assert_sha256 "$LM_SRC" "$exp_lm" "$LM_FILENAME" \
       || { rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1; }
     if [[ -f "$LM_PREDICT_SRC" ]]; then
@@ -439,7 +467,7 @@ write_manifest() {
   files_json=$(jq -nc \
     --arg lm "$lmh" --arg lmb "$lmb" --arg pr "$pr" --arg prb "$prb" \
     '{"zh_CN.lm":{sha256:$lm, bytes:($lmb|tonumber)}} + (if $pr != "" then {"zh_CN.lm.predict":{sha256:$pr, bytes:($prb|tonumber)}} else {} end)')
-  jq -n --arg release "$RELEASE_TAG" --arg source "$LM_SOURCE" \
+  jq -n --arg release "$LM_RELEASE" --arg source "$LM_SOURCE" \
     --argjson files "$files_json" \
     '{release:$release, source:$source, files:$files}' >"${MANIFEST}.tmp"
   mv "${MANIFEST}.tmp" "$MANIFEST"
@@ -687,7 +715,7 @@ apply_and_activate
 echo
 echo "omarime installed (release ${RELEASE_TAG}):"
 echo "  language model   ${OMARIME_LM_DIR}/${LM_FILENAME} (via LIBIME_MODEL_DIRS)"
-echo "                   tracked in ${MANIFEST} (verified against release ${RELEASE_TAG})"
+echo "                   tracked in ${MANIFEST} (verified against LM release ${LM_RELEASE:-none})"
 echo "  candidate window follows the active omarchy theme"
 echo "  bar indicator    event-driven 中/EN · left-click toggle · right-click settings"
 echo "  settings panel   fuzzy pairs, correction, vertical list, cloud pinyin,"

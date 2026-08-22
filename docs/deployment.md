@@ -111,12 +111,16 @@ cloud-pinyin 预测（安装会给出 warning）。
 
 ## 语言模型更新
 
+**LM 资产不随每个 release 重复上传**：install.sh 自动解析“最新一个
+带 `zh_CN.lm` 资产的 release”作为模型源（`resolve_lm_release`），
+模型字节没变就永远从原 release 拉取，发版无需重新上传 463MB。
+
 LM 由 `~/.local/share/omarime/lib/model-manifest.json` 跟踪：
 
 ```json
 {
-  "release": "v0.1.1",
-  "source": "release",
+  "release": "v0.1.1",     // 实际持有该模型的 release（解析结果）
+  "source": "release",     // release | lm-file | dist
   "files": {
     "zh_CN.lm": {"sha256": "…", "bytes": 463166204},
     "zh_CN.lm.predict": {"sha256": "…", "bytes": 3901025}
@@ -124,17 +128,17 @@ LM 由 `~/.local/share/omarime/lib/model-manifest.json` 跟踪：
 }
 ```
 
-更新流程：
+更新流程（模型真的变化时）：
 
 1. 训练新模型 (kenlm → ARPA → `libime_slm_build_binary`)
 2. 生成预测索引 (`libime_prediction`)
-3. 上传到新 release（替换 asset）
-4. 用户重新运行 `install.sh` → 新 `VERSION` 与 manifest 不一致，
-   自动下载并原子替换旧的 LM
+3. 上传到**新 release**（`gh release upload <新tag> zh_CN.lm zh_CN.lm.predict`）
+4. 用户重新运行 `install.sh` → 解析到新 release，digest 与 manifest
+   不一致 → 自动下载并原子替换旧 LM
 
-已有 LM 只在 manifest.release == 当前 VERSION 且 sha256 全部匹配时
-才跳过；升级 VERSION 后必然触发更新。旧安装（无 manifest）会先比对
-已有文件与 release digest，一致则只补写 manifest（无需重下 463MB）。
+已有 LM 只在 `manifest.release == 解析出的 LM release` 且 sha256 全部
+匹配时才跳过。旧安装（无 manifest）会先比对已有文件与当前 LM release
+的 digest，一致则只补写 manifest（无需重下 463MB）。
 
 ## CI / 发布
 
@@ -166,8 +170,10 @@ echo "0.1.1" > VERSION
 git add -A && git commit -m "release: vX.Y.Z"
 git tag vX.Y.Z && git push origin main vX.Y.Z
 
-# 4. 手动上传 LM assets 到该 release (463MB 不适合 CI)
+# 4. LM 资产：仅当模型内容变化时才上传（install.sh 自动解析最新
+#    带 zh_CN.lm 的 release，未变化时无需重复上传 463MB）
 gh release upload vX.Y.Z zh_CN.lm zh_CN.lm.predict --repo forbidden-game/omarime
+#    （模型没变 → 跳过此步）
 
 # 5. 取消 draft (CI 建的是 draft, 防止未验证 tag 直接发布)
 #    注意: REST API 按 tag 查询不到 draft (404), 必须用数字 id:
@@ -176,9 +182,10 @@ NUM_ID=$(gh api repos/forbidden-game/omarime/releases \
 gh api repos/forbidden-game/omarime/releases/$NUM_ID -X PATCH -f draft=false
 ```
 
-用户侧更新：`git pull && ./install.sh`——install.sh 按 `VERSION` 拉取对应
-release 的 LM，sha256 **fail-closed** 校验（拿不到 digest 即失败，不降级
-为跳过），然后写入 manifest。已安装且 manifest 一致的 LM 会跳过。
+用户侧更新：`git pull && ./install.sh`——install.sh 解析最新带
+`zh_CN.lm` 的 release 作为模型源，sha256 **fail-closed** 校验（拿不到
+digest 即失败，不降级为跳过），然后写入 manifest。已安装且
+manifest 与该 release 一致的 LM 会跳过。
 
 ## 依赖声明
 
