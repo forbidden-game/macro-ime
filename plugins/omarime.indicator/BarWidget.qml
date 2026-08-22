@@ -49,12 +49,16 @@ BarWidget {
     queryProc.running = true
   }
 
-  function toast() {
+  function toast(state) {
     if (!toastEnabled || !root.bar) return
+    // onImStateChanged runs before bindings derived from imState necessarily
+    // re-evaluate. Derive from the signal's new state directly; reading
+    // imActive here can announce the previous (opposite) mode.
+    const active = state === 2
     // Direct shell IPC (~40ms) instead of the omarchy osd wrapper chain.
     const payload = JSON.stringify({
-      icon: root.imActive ? "中" : "A",
-      message: root.imActive ? "中文输入法" : "英文",
+      icon: active ? "中" : "A",
+      message: active ? "中文输入法" : "英文",
       value: "", progressText: "", max: "100", duration: "1200"
     })
     root.bar.run("omarchy-shell -q osd show " + Util.shellQuote(payload))
@@ -64,7 +68,7 @@ BarWidget {
     // Only 1↔2 flips are user-visible switches; 0→x means fcitx5 just started.
     if ((root.lastAnnounced === 1 || root.lastAnnounced === 2)
         && (imState === 1 || imState === 2)) {
-      root.toast()
+      root.toast(imState)
     }
     root.lastAnnounced = imState
   }
