@@ -19,6 +19,7 @@ OMARIME_HOME="${HOME}/.local/share/omarime"
 PLUGIN_DIR="${HOME}/.config/omarchy/plugins"
 UI_CONF="${HOME}/.config/fcitx5/conf/classicui.conf"
 CORE_CONF="${HOME}/.config/fcitx5/config"
+PY_CONF="${HOME}/.config/fcitx5/conf/pinyin.conf"
 BACKUP_DIR="$OMARIME_HOME/backup"
 STATE_ADDON_CONF="${HOME}/.local/share/fcitx5/addon/omarime-state.conf"
 FCITX_DROPIN="${HOME}/.config/systemd/user/omarchy-fcitx5.service.d/omarime-state.conf"
@@ -99,6 +100,7 @@ undo() {
   step 2 3 "Restoring original fcitx5 config"
   restore_file classicui.conf "$UI_CONF"
   restore_file config "$CORE_CONF"
+  restore_file pinyin.conf "$PY_CONF"
   ok "config restored"
   step 3 3 "Disabling plugins + removing installed files"
   # Remove shell.json references while the manifests are still discoverable.
@@ -175,6 +177,7 @@ prepare_fcitx_config() {
   mkdir -p "$BACKUP_DIR"
   backup_file_once "$UI_CONF" classicui.conf
   backup_file_once "$CORE_CONF" config
+  backup_file_once "$PY_CONF" pinyin.conf
 
   mkdir -p "$(dirname "$CORE_CONF")"
   [[ -f $CORE_CONF ]] || : >"$CORE_CONF"
@@ -191,6 +194,21 @@ prepare_fcitx_config() {
   fi
   mv "$tmp" "$CORE_CONF"
   note "config updated (PreeditEnabledByDefault=False)"
+
+  # Pinyin addon: omarime ships with cross-sentence context OFF so the same
+  # input always yields the same candidates (intra-sentence context stays on,
+  # it is a separate, always-active path). Re-enable from the settings panel.
+  mkdir -p "$(dirname "$PY_CONF")"
+  [[ -f $PY_CONF ]] || : >"$PY_CONF"
+  tmp=$(mktemp "$(dirname "$PY_CONF")/.pinyin.XXXXXX")
+  if grep -q '^KeepCurrentContext=' "$PY_CONF"; then
+    sed 's/^KeepCurrentContext=.*/KeepCurrentContext=False/' "$PY_CONF" >"$tmp"
+  else
+    cat "$PY_CONF" >"$tmp"
+    printf 'KeepCurrentContext=False\n' >>"$tmp"
+  fi
+  mv "$tmp" "$PY_CONF"
+  note "pinyin default: cross-sentence context off (KeepCurrentContext=False)"
   if (( was_active )); then
     systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
     systemctl --user start omarchy-fcitx5.service

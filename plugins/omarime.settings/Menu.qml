@@ -29,6 +29,7 @@ Item {
   property bool cloud: false
   property string correction: "None"
   property var fuzzy: ({})
+  property bool contextInter: true
   property int userModelWeight: 20
   property bool busy: false
   property bool confirmReset: false
@@ -264,6 +265,15 @@ Item {
           }
         }
 
+        Toggle {
+          width: parent.width
+          label: "跨句上下文"
+          description: "上屏句尾两词参与后续候选排序 · 关闭后同拼音候选更稳定"
+          checked: root.contextInter
+          enabled: !root.busy
+          onClicked: root.apply("context.inter", !root.contextInter ? "true" : "false")
+        }
+
         // fuzzy grid
         Column {
           width: parent.width
@@ -396,6 +406,7 @@ Item {
           root.cloud = s.cloud === true
           root.correction = String(s.correction || "None")
           root.fuzzy = s.fuzzy || {}
+          root.contextInter = s.contextInter !== false
           root.userModelWeight = Number(s.userModelWeight ?? 20)
         } catch (e) {
           root.notice = "读取配置失败：" + e
