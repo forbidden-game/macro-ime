@@ -9,7 +9,7 @@
 #   ~/.local/share/fcitx5/themes/omarime          generated theme (live)
 #   ~/.local/share/omarime/bin/omarime-config     settings backend (live-reload)
 #   ~/.config/omarchy/hooks/theme-set.d/omarime.sh  palette follows omarchy themes
-#   ~/.config/omarchy/plugins/omarime.indicator    中/EN bar widget (+OSD toast)
+#   ~/.config/omarchy/plugins/omarime.indicator    中/EN bar widget
 #   ~/.config/omarchy/plugins/omarime.settings     settings panel (right-click widget)
 set -euo pipefail
 

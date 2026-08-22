@@ -113,7 +113,7 @@ omarime/
 ├── hypr/                     # bindings snippet
 ├── bin/omarime-config        # live fcitx5 settings backend
 ├── plugins/
-│   ├── omarime.indicator/    # bar-widget 中/A + toggle/OSD (Phase 3)
+│   ├── omarime.indicator/    # bar-widget 中/A + toggle (Phase 3)
 │   ├── omarime.settings/     # native settings menu (Phase 3)
 │   └── omarime.candidate/    # kimpanel Quickshell overlay (Phase 4)
 ├── themes/                   # classicui theme generator + theme-set hook
@@ -173,7 +173,7 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
       retro-82 dark + catppuccin-latte light, horizontal + vertical)
 - [x] `omarime.indicator` bar widget (中/A, left-click toggle, right-click settings,
       per-program focus refresh + 2s fallback poll)
-- [x] OSD toast on switch (direct `omarchy-shell` IPC, ~40ms dispatch)
+- [x] Keep switch feedback bar-only; removed redundant delayed OSD
 - [x] Native `omarime.settings` menu: active state, horizontal/vertical,
       cloud pinyin, QWERTY correction, 13 fuzzy pairs, theme regeneration,
       user-dictionary reset; atomic `Controller1.SetConfig` writes
