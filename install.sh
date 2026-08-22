@@ -85,7 +85,7 @@ ERROR_HANDLED=0
 
 require_commands() {
   local missing=() c
-  for c in omarchy omarchy-shell fcitx5 fcitx5-remote jq busctl hyprctl fc-match; do
+  for c in omarchy omarchy-shell systemctl fcitx5 fcitx5-remote jq busctl hyprctl fc-match; do
     command -v "$c" >/dev/null || missing+=("$c")
   done
   # fcitx5-chinese-addons ships the pinyin engine that omarime builds on.
@@ -94,12 +94,12 @@ require_commands() {
     missing+=("fcitx5-chinese-addons (pinyin addon) — install with: omarchy pkg add fcitx5-chinese-addons")
   # Build tools only when we actually have to compile the addon from source.
   if [[ ! -f "${SRC}/dist/libomarime-state.so" ]]; then
-    pkg-config --exists 'Fcitx5Core >= 5.1' 2>/dev/null || \
-      missing+=("Fcitx5Core >= 5.1 (fcitx5 dev headers — to build the addon)")
-    for c in cmake c++; do
+    for c in pkg-config cmake c++; do
       command -v "$c" >/dev/null || \
         missing+=("$c (to build the addon; or provide dist/libomarime-state.so)")
     done
+    pkg-config --exists 'Fcitx5Core >= 5.1' 2>/dev/null || \
+      missing+=("Fcitx5Core >= 5.1 (fcitx5 dev headers — to build the addon)")
   fi
   if (( ${#missing[@]} )); then
     printf '%s✗ omarime: missing required dependencies:%s\n' "$C_R" "$C_0" >&2
@@ -276,7 +276,7 @@ assert_sha256() {
   local file=$1 expected=$2 label=$3
   local actual
   if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
-    echo "omarime: no sha256 digest available for ${label} (release ${RELEASE_TAG} API?)" >&2
+    echo "omarime: no sha256 digest available for ${label} (release ${LM_RELEASE:-unknown} API?)" >&2
     return 1
   fi
   actual=$(sha256sum "$file" | cut -d' ' -f1)
@@ -317,11 +317,14 @@ prepare_language_model() {
   fi
 
   # Newest release carrying zh_CN.lm — the source of truth for "current"
-  # model bytes. Empty when gh is unavailable (offline installs rely on
-  # --lm-file / dist and simply skip the release-verified paths).
-  LM_RELEASE="$(resolve_lm_release)"
+  # model bytes. Never resolved in --offline mode (no network at all) or
+  # when an explicit --lm-file was given (no release involvement).
+  LM_RELEASE=""
+  if (( ! OFFLINE )) && [[ -z "$LM_FILE" ]]; then
+    LM_RELEASE="$(resolve_lm_release)"
+  fi
   if [[ -z "$LM_RELEASE" ]]; then
-    note "(no LM release resolvable — release-verified paths disabled)"
+    note "(no LM release resolution — offline or gh unavailable)"
   else
     note "LM assets resolved from release ${LM_RELEASE}"
   fi
@@ -330,24 +333,36 @@ prepare_language_model() {
   local predict_dest="${OMARIME_LM_DIR}/${LM_PREDICT_FILENAME}"
 
   # --- 1. Already installed and verified against the current LM release?
-  if [[ -f "$MANIFEST" && -f "$lm_dest" && -n "$LM_RELEASE" ]]; then
+  #        (--lm-file always bypasses this: an explicit file wins.)
+  if [[ -z "$LM_FILE" && -f "$MANIFEST" && -f "$lm_dest" ]]; then
     local mrel msrc lmh prh
     mrel=$(jq -r '.release // ""' "$MANIFEST" 2>/dev/null || true)
     msrc=$(jq -r '.source // ""' "$MANIFEST" 2>/dev/null || true)
     lmh=$(jq -r '.files["zh_CN.lm"].sha256 // ""' "$MANIFEST" 2>/dev/null || true)
     prh=$(jq -r '.files["zh_CN.lm.predict"].sha256 // ""' "$MANIFEST" 2>/dev/null || true)
-    if [[ "$mrel" == "$LM_RELEASE" && "$msrc" == "release" && \
+    if [[ "$msrc" == "release" && \
           "$lmh" == "$(sha256sum "$lm_dest" | cut -d' ' -f1)" && \
           -f "$predict_dest" && "$prh" == "$(sha256sum "$predict_dest" | cut -d' ' -f1)" ]]; then
-      note "LM already installed and verified (release ${LM_RELEASE})"
-      ok "language model in place"
-      return 0
+      if [[ -n "$LM_RELEASE" ]]; then
+        # Online: skip only when the manifest tracks the current LM release.
+        if [[ "$mrel" == "$LM_RELEASE" ]]; then
+          note "LM already installed and verified (release ${LM_RELEASE})"
+          ok "language model in place"
+          return 0
+        fi
+        note "newer model available (release ${LM_RELEASE}, installed ${mrel}); updating"
+      elif (( OFFLINE )); then
+        # Offline: can't check for updates — trust the local manifest.
+        note "LM already installed and manifest-verified; offline, skipping"
+        ok "language model in place"
+        return 0
+      fi
     fi
   fi
 
   # --- 2. Migration: files exist and match the current LM release's digest?
   #        Then just (re)write the manifest — no 463MB re-download.
-  if [[ -f "$lm_dest" && -f "$predict_dest" && -n "$LM_RELEASE" ]]; then
+  if [[ -z "$LM_FILE" && -f "$lm_dest" && -f "$predict_dest" && -n "$LM_RELEASE" ]]; then
     local rd rp
     rd=$(gh_release_digest "$LM_FILENAME" "$LM_RELEASE")
     rp=$(gh_release_digest "$LM_PREDICT_FILENAME" "$LM_RELEASE")
@@ -373,6 +388,9 @@ prepare_language_model() {
     if [[ ! -f "$LM_PREDICT_SRC" ]]; then
       note "warning: no ${LM_PREDICT_FILENAME} next to $LM_FILE — cloud-pinyin prediction will be off"
       LM_PREDICT_SRC=""
+    elif [[ $(stat -c%s "$LM_PREDICT_SRC") -lt 1000000 ]]; then
+      echo "omarime: ${LM_PREDICT_SRC} is only $(stat -c%s "$LM_PREDICT_SRC") bytes (expected ~3.9MB); looks truncated" >&2
+      return 1
     fi
     LM_SOURCE="lm-file"
     check_lm_size "$LM_SRC" "$LM_FILENAME" || return 1
@@ -380,14 +398,26 @@ prepare_language_model() {
   elif [[ -f "${SRC}/dist/${LM_FILENAME}" ]]; then
     LM_SRC="${SRC}/dist/${LM_FILENAME}"
     LM_PREDICT_SRC="${SRC}/dist/${LM_PREDICT_FILENAME}"
-    [[ -f "$LM_PREDICT_SRC" ]] || LM_PREDICT_SRC=""
+    if [[ ! -f "$LM_PREDICT_SRC" ]]; then
+      LM_PREDICT_SRC=""
+    elif [[ $(stat -c%s "$LM_PREDICT_SRC") -lt 1000000 ]]; then
+      echo "omarime: ${LM_PREDICT_SRC} is only $(stat -c%s "$LM_PREDICT_SRC") bytes (expected ~3.9MB); looks truncated" >&2
+      return 1
+    fi
     LM_SOURCE="dist"
     check_lm_size "$LM_SRC" "$LM_FILENAME" || return 1
     note "using LM from repo dist/ directory (not verified against the release digest)"
   else
     if (( OFFLINE )); then
-      echo "omarime: LM not found locally and --offline is set." >&2
-      echo "  Place it at dist/${LM_FILENAME} or use --lm-file <path>" >&2
+      if [[ -f "$lm_dest" ]]; then
+        echo "omarime: LM files exist locally but are not verified" >&2
+        echo "  (missing/mismatched ${MANIFEST}, and --offline cannot resolve the release)." >&2
+        echo "  Re-run online once to verify, or delete the old files to reinstall:" >&2
+        echo "    rm -f ${OMARIME_LM_DIR}/${LM_FILENAME} ${OMARIME_LM_DIR}/${LM_PREDICT_FILENAME}" >&2
+      else
+        echo "omarime: LM not found locally and --offline is set." >&2
+        echo "  Place it at dist/${LM_FILENAME} or use --lm-file <path>" >&2
+      fi
       return 1
     fi
     if ! command -v gh >/dev/null; then
@@ -709,13 +739,16 @@ commit_fcitx_config
 step 6 $TOTAL "Applying theme + activating plugins"
 apply_and_activate
 
+# Manifest summary for the final report.
+LM_MANIFEST_REL=$(jq -r '.release // ""' "$MANIFEST" 2>/dev/null || true)
+
 # Clean up the temp download dir (kept alive through the commit phase).
 [[ -n "$LM_DL_DIR" ]] && rm -rf "$LM_DL_DIR"
 
 echo
 echo "omarime installed (release ${RELEASE_TAG}):"
 echo "  language model   ${OMARIME_LM_DIR}/${LM_FILENAME} (via LIBIME_MODEL_DIRS)"
-echo "                   tracked in ${MANIFEST} (verified against LM release ${LM_RELEASE:-none})"
+echo "                   tracked in ${MANIFEST} (LM release ${LM_MANIFEST_REL:-none})"
 echo "  candidate window follows the active omarchy theme"
 echo "  bar indicator    event-driven 中/EN · left-click toggle · right-click settings"
 echo "  settings panel   fuzzy pairs, correction, vertical list, cloud pinyin,"

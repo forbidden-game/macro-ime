@@ -65,7 +65,8 @@ cd omarime
 install.sh 自动：
 1. 检查依赖 (fcitx5 + pinyin addon, omarchy, omarchy-shell, jq/busctl/hyprctl；
    预编译 addon 在 repo 里时无需编译工具链)
-2. 解析 LM：锁定的 release（sha256 fail-closed 校验）/ dist/ / --lm-file，
+2. 解析 LM：自动定位最新带 `zh_CN.lm` 资产的 release
+   （sha256 fail-closed 校验）/ dist/ / --lm-file，
    并依据 model-manifest.json 判定是否已安装且一致
 3. 安装预编译 addon（含 ldd -r ABI 预检；失败回退本地 cmake 编译）
 4. 安装主题 + 插件 + 配置后端（插件安装前备份既有目录）
@@ -79,9 +80,11 @@ install.sh 自动：
 repo 是私有的，裸 `curl` 会 404——用 `gh`（自动带认证）下载：
 
 ```bash
-# 在有网络的机器上 (需 gh auth login)
-VERSION=$(cat VERSION)   # 例如 0.1.0
-gh release download "v${VERSION}" --repo forbidden-game/omarime \
+# 在有网络的机器上 (需 gh auth login)—— 从持有 LM 的 release 下载
+# （LM 不随每个版本重复上传；这条命令与 install.sh 的解析逻辑一致）
+LM_TAG=$(gh api repos/forbidden-game/omarime/releases --paginate \
+  --jq '.[] | select(any(.assets[]?; .name == "zh_CN.lm")) | .tag_name' | head -1)
+gh release download "$LM_TAG" --repo forbidden-game/omarime \
   --pattern 'zh_CN.lm' --pattern 'zh_CN.lm.predict' --dir /tmp/omarime-lm
 
 # 在目标机器上 (U 盘/内网传输 /tmp/omarime-lm/)

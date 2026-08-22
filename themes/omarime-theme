@@ -68,7 +68,10 @@ while [[ $# -gt 0 ]]; do
     --font) FONT_FAMILY=$2; shift 2 ;;
     --size) FONT_SIZE=$2; shift 2 ;;
     --border-width) BORDER_WIDTH=$2; shift 2 ;;
-    --pill-alpha) PILL_ALPHA=$2; shift 2 ;;
+    --pill-alpha) PILL_ALPHA=$2; shift 2
+      if [[ ! $PILL_ALPHA =~ ^[0-9]+$ ]] || (( PILL_ALPHA > 100 )); then
+        die "--pill-alpha must be an integer 0-100"
+      fi ;;
     --label-alpha) LABEL_ALPHA=$2; shift 2 ;;
     --dim-alpha) DIM_ALPHA=$2; shift 2 ;;
     --sep-alpha) SEP_ALPHA=$2; shift 2 ;;
@@ -219,7 +222,7 @@ conf_wants() { # does the conf file already carry every value we want?
   return 0
 }
 
-svc_active() { systemctl --user is-active --quiet omarchy-fcitx5.service; }
+svc_active() { systemctl --user is-active --quiet omarchy-fcitx5.service || pgrep -x fcitx5 >/dev/null 2>&1; }
 
 apply_ui_conf() {
   local tmp keys key val

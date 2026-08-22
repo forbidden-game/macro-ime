@@ -93,10 +93,10 @@ jobs:
           bash -c 'source /tmp/defs.sh
           for f in require_commands on_error service_running stop_fcitx restart_fcitx \
                    restore_file backup_file_once restore_plugin_dir undo load_version \
-                   gh_release_digest assert_sha256 check_lm_size prepare_language_model \
-                   commit_language_model write_manifest install_addon build_state_addon_to \
-                   install_runtime install_plugins prepare_fcitx_config \
-                   commit_fcitx_config health_check apply_and_activate; do
+                   gh_release_digest resolve_lm_release assert_sha256 check_lm_size \
+                   prepare_language_model commit_language_model write_manifest \
+                   install_addon build_state_addon_to install_runtime install_plugins \
+                   prepare_fcitx_config commit_fcitx_config health_check apply_and_activate; do
             declare -F "$f" > /dev/null || { echo "MISSING before main: $f"; exit 1; }
           done'
           echo "OK: all step functions defined before main"
