@@ -100,6 +100,7 @@ get_value() {
       local pair=${1#fuzzy.} k
       k=$(fuzzy_ini_key "$pair") || die "unknown fuzzy pair: $pair"
       [[ $(ini_get "$PYCONF" "$k" False) =~ True ]] && echo true || echo false ;;
+    usermodel.weight) ini_get "$PYCONF" UserModelWeight 20 ;;
     *) die "unknown key: $1" ;;
   esac
 }
@@ -131,6 +132,10 @@ set_value() {
       [[ $value == true || $value == false ]] || die "fuzzy: bool"
       ini=$([ "$value" == true ] && echo True || echo False)
       set_addon_value pinyin "$PYCONF" "$k" "$ini" Fuzzy ;;
+    usermodel.weight)
+      [[ $value =~ ^[0-9]+$ ]] || die "usermodel.weight: int 0-100"
+      (( value > 100 )) && die "usermodel.weight: max 100"
+      set_addon_value pinyin "$PYCONF" "UserModelWeight" "$value" ;;
     *) die "unknown key: $key" ;;
   esac
 }
@@ -164,10 +169,12 @@ case ${1:-} in
       --argjson lR "$(get_value fuzzy.l_r)" \
       --argjson vU "$(get_value fuzzy.v_u)" \
       --argjson uOu "$(get_value fuzzy.u_ou)" \
+      --argjson userModelWeight "$(get_value usermodel.weight)" \
       '{imActive:$imActive, vertical:$vertical, cloud:$cloud, correction:$correction,
         fuzzy:{anAng:$anAng, enEng:$enEng, inIng:$inIng, ianIang:$ianIang,
                uanUang:$uanUang, cCh:$cCh, sSh:$sSh, zZh:$zZh, lN:$lN,
-               fH:$fH, lR:$lR, vU:$vU, uOu:$uOu}}' ;;
+               fH:$fH, lR:$lR, vU:$vU, uOu:$uOu},
+        userModelWeight:$userModelWeight}' ;;
   action)
     case ${2:-} in
       theme-regenerate)

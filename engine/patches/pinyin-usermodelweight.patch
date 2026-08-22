@@ -1,0 +1,42 @@
+# Patch: Add UserModelWeight config option to fcitx5-pinyin addon
+# Target: fcitx5-chinese-addons im/pinyin/ (version 5.1.13)
+#
+# This adds a "UserModelWeight" integer option (0-100, default 20) to the
+# pinyin engine configuration. The value is applied as:
+#   model->setHistoryWeight(value / 100.0f)
+#
+# Effect: controls how strongly the user's recent typing history influences
+# candidate ranking. Most visible on abbreviation input (e.g. single letter
+# "d") where the language model context is weak.
+#
+# Build instructions:
+#   1. git clone https://github.com/fcitx/fcitx5-chinese-addons
+#   2. Apply the two hunks below to im/pinyin/pinyin.h and im/pinyin/pinyin.cpp
+#   3. Build with:
+#        cmake -B build -DCMAKE_BUILD_TYPE=Release <minimal CMakeLists>
+#      or use the project's full build system
+#   4. Install: sudo cp build/libpinyin.so /usr/lib/fcitx5/libpinyin.so
+#   5. Restart: systemctl --user restart omarchy-fcitx5.service
+
+--- a/im/pinyin/pinyin.h
++++ b/im/pinyin/pinyin.h
+@@ -366,6 +366,9 @@ FCITX_CONFIGURATION(
+              .annotation = {_("Enter quickphrase mode when current input "
+                              "matches any regular "
+                              "expression from the list.")}}};
++    Option<int, IntConstrain> userModelWeight{
++        this, "UserModelWeight", _("User Model Weight (0-100)"), 20,
++        IntConstrain(0, 100)};
+     Option<FuzzyConfig> fuzzyConfig{this, "Fuzzy", _("Fuzzy Pinyin")};
+     HiddenOption<bool> firstRun{this, "FirstRun", "FirstRun", true};)
+
+--- a/im/pinyin/pinyin.cpp
++++ b/im/pinyin/pinyin.cpp
+@@ -1057,6 +1057,8 @@ void PinyinEngine::populateConfig() {
+     ime_->setPreeditMode(*config_.showActualPinyinInPreedit
+                              ? libime::PinyinPreeditMode::Pinyin
+                              : libime::PinyinPreeditMode::RawText);
++    ime_->model()->setHistoryWeight(*config_.userModelWeight / 100.0f);
+ 
+     // Setup fuzzy flags.
+     libime::PinyinFuzzyFlags flags;

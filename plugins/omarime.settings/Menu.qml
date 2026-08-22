@@ -29,6 +29,7 @@ Item {
   property bool cloud: false
   property string correction: "None"
   property var fuzzy: ({})
+  property int userModelWeight: 20
   property bool busy: false
   property bool confirmReset: false
   property string notice: ""
@@ -209,6 +210,60 @@ Item {
           }
         }
 
+        // user model weight
+        Column {
+          width: parent.width
+          spacing: Style.spacing.xs
+
+          Text {
+            text: "用户模型强度（影响缩写候选排序）"
+            color: Color.foreground
+            opacity: 0.85
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Row {
+            spacing: Style.spacing.sm
+
+            Button {
+              text: "关"
+              selected: root.userModelWeight === 0
+              focusable: true
+              enabled: !root.busy
+              onClicked: root.apply("usermodel.weight", "0")
+            }
+            Button {
+              text: "弱"
+              selected: root.userModelWeight === 10
+              focusable: true
+              enabled: !root.busy
+              onClicked: root.apply("usermodel.weight", "10")
+            }
+            Button {
+              text: "默认"
+              selected: root.userModelWeight === 20
+              focusable: true
+              enabled: !root.busy
+              onClicked: root.apply("usermodel.weight", "20")
+            }
+            Button {
+              text: "中"
+              selected: root.userModelWeight === 50
+              focusable: true
+              enabled: !root.busy
+              onClicked: root.apply("usermodel.weight", "50")
+            }
+            Button {
+              text: "强"
+              selected: root.userModelWeight === 100
+              focusable: true
+              enabled: !root.busy
+              onClicked: root.apply("usermodel.weight", "100")
+            }
+          }
+        }
+
         // fuzzy grid
         Column {
           width: parent.width
@@ -341,6 +396,7 @@ Item {
           root.cloud = s.cloud === true
           root.correction = String(s.correction || "None")
           root.fuzzy = s.fuzzy || {}
+          root.userModelWeight = Number(s.userModelWeight ?? 20)
         } catch (e) {
           root.notice = "读取配置失败：" + e
         }
