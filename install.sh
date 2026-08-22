@@ -12,7 +12,7 @@
 #   ~/.config/omarchy/hooks/theme-set.d/omarime.sh  palette follows omarchy themes
 #   ~/.config/omarchy/plugins/omarime.indicator    中/EN bar widget
 #   ~/.config/omarchy/plugins/omarime.settings     settings panel (right-click widget)
-set -euo pipefail
+set -Eeuo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OMARIME_HOME="${HOME}/.local/share/omarime"
@@ -23,6 +23,43 @@ BACKUP_DIR="$OMARIME_HOME/backup"
 STATE_ADDON_CONF="${HOME}/.local/share/fcitx5/addon/omarime-state.conf"
 FCITX_DROPIN="${HOME}/.config/systemd/user/omarchy-fcitx5.service.d/omarime-state.conf"
 RUNTIME_STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/${UID}}/omarime"
+
+# --- progress + error handling -----------------------------------------------
+# Colors only when stderr is a real terminal, so piped/CI logs stay clean.
+if [[ -t 2 ]]; then C_B=$'\033[1;36m' C_R=$'\033[0;31m' C_G=$'\033[0;32m' C_0=$'\033[0m'
+else               C_B= C_R= C_G= C_0=; fi
+
+step() { printf '\n%s==> [%s/%s] %s%s\n' "$C_B" "$1" "$2" "$3" "$C_0"; }  # step n total title
+note() { printf '    %s\n' "$1"; }
+ok()   { printf '%s    \u2713 %s%s\n' "$C_G" "$1" "$C_0"; }
+
+# Fail fast, before anything is touched: a missing dependency must not leave a
+# half-applied install behind.
+require_commands() {
+  local missing=() c m
+  for c in cmake c++ pkg-config omarchy omarchy-shell; do
+    command -v "$c" >/dev/null || missing+=("$c")
+  done
+  pkg-config --exists 'Fcitx5Core >= 5.1' 2>/dev/null || \
+    missing+=("Fcitx5Core >= 5.1 development headers")
+  if (( ${#missing[@]} )); then
+    printf '%s\u2717 omarime: missing required dependencies:%s\n' "$C_R" "$C_0" >&2
+    for m in "${missing[@]}"; do printf '    - %s\n' "$m" >&2; done
+    printf '  Install them, then re-run: %s\n' "$0" >&2
+    exit 1
+  fi
+}
+
+on_error() {  # ERR trap: locate the failure and point at rollback.
+  local code=$? line=$1
+  trap - ERR
+  printf '\n%s\u2717 omarime: install failed (exit %s, near line %s).%s\n' \
+    "$C_R" "$code" "$line" "$C_0" >&2
+  printf '  A partial install may remain on this machine. Roll everything back with:\n' >&2
+  printf '      %s --undo\n' "$0" >&2
+  exit "$code"
+}
+trap 'on_error $LINENO' ERR
 
 service_running() {
   case $(systemctl --user is-active omarchy-fcitx5.service 2>/dev/null || true) in
@@ -52,14 +89,21 @@ restore_file() { # restore_file <backup-name> <destination>
 undo() {
   local was_active=0
   service_running && was_active=1
-  stop_fcitx
+  step 1 3 "Stopping fcitx5"
+  if ! stop_fcitx; then
+    printf '%s\u2717 fcitx5 is still running; aborting undo to protect live files.%s\n' "$C_R" "$C_0" >&2
+    printf '  Quit the IM (or wait for fcitx5 to exit), then re-run: %s --undo\n' "$0" >&2
+    return 1
+  fi
+  ok "fcitx5 stopped"
+  step 2 3 "Restoring original fcitx5 config"
   restore_file classicui.conf "$UI_CONF"
   restore_file config "$CORE_CONF"
-
+  ok "config restored"
+  step 3 3 "Disabling plugins + removing installed files"
   # Remove shell.json references while the manifests are still discoverable.
   omarchy plugin disable omarime.indicator >/dev/null 2>&1 || true
   omarchy plugin disable omarime.settings >/dev/null 2>&1 || true
-
   # Restore any files that occupied our addon/drop-in paths before install.
   restore_file state-addon.conf "$STATE_ADDON_CONF"
   restore_file fcitx-dropin.conf "$FCITX_DROPIN"
@@ -74,7 +118,7 @@ undo() {
     systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
     systemctl --user start omarchy-fcitx5.service
   fi
-  echo "omarime: removed; fcitx5 config restored to its pre-install state"
+  ok "removed; fcitx5 config restored to its pre-install state"
 }
 
 backup_file_once() { # backup_file_once <source> <backup-name>
@@ -95,9 +139,14 @@ build_state_addon() {
     echo "omarime: Fcitx5Core development files are required" >&2; return 1; }
 
   build_dir=$(mktemp -d)
+  trap 'rm -rf "$build_dir"' RETURN
+  note "configuring (cmake)"
   cmake -S "$SRC/engine/omarime-state" -B "$build_dir" \
-    -DCMAKE_BUILD_TYPE=Release >/dev/null
-  cmake --build "$build_dir" --parallel >/dev/null
+    -DCMAKE_BUILD_TYPE=Release >/dev/null || {
+      echo "omarime: cmake configure failed" >&2; return 1; }
+  note "compiling libomarime-state.so"
+  cmake --build "$build_dir" --parallel >/dev/null || {
+      echo "omarime: build failed (fcitx5 ABI mismatch?)" >&2; return 1; }
 
   mkdir -p "$OMARIME_HOME/lib/fcitx5" "$(dirname "$STATE_ADDON_CONF")" \
            "$(dirname "$FCITX_DROPIN")"
@@ -117,15 +166,21 @@ EOF
 prepare_fcitx_config() {
   local was_active=0 tmp
   service_running && was_active=1
-  stop_fcitx
-
+  step 1 5 "Preparing fcitx5 config"
+  if ! stop_fcitx; then
+    echo "omarime: cannot proceed while fcitx5 is still running" >&2
+    return 1
+  fi
+  note "backing up current fcitx5 config"
   mkdir -p "$BACKUP_DIR"
   backup_file_once "$UI_CONF" classicui.conf
   backup_file_once "$CORE_CONF" config
 
   mkdir -p "$(dirname "$CORE_CONF")"
   [[ -f $CORE_CONF ]] || : >"$CORE_CONF"
-  tmp=$(mktemp)
+  # Same directory as the target so the final mv is an atomic rename, not a
+  # cross-device copy that could corrupt the config if it fails halfway.
+  tmp=$(mktemp "$(dirname "$CORE_CONF")/.config.XXXXXX")
   if grep -q '^PreeditEnabledByDefault=' "$CORE_CONF"; then
     sed 's/^PreeditEnabledByDefault=.*/PreeditEnabledByDefault=False/' "$CORE_CONF" >"$tmp"
   elif grep -q '^\[Behavior\]$' "$CORE_CONF"; then
@@ -135,20 +190,28 @@ prepare_fcitx_config() {
     printf '\n[Behavior]\nPreeditEnabledByDefault=False\n' >>"$tmp"
   fi
   mv "$tmp" "$CORE_CONF"
-
+  note "config updated (PreeditEnabledByDefault=False)"
   if (( was_active )); then
     systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
     systemctl --user start omarchy-fcitx5.service
   fi
+  ok "fcitx5 config ready"
   return 0
 }
 
 [[ ${1:-} == "--undo" ]] && { undo; exit 0; }
 
-# Back up first, then make preedit part of our panel instead of an app-drawn box.
+# Nothing is touched until every dependency is present.
+require_commands
+
+echo "omarime: installing Omarchy-native Chinese IME experience"
+
+# 1. config — back up first, then make preedit part of our panel instead of an
+#    app-drawn box.
 prepare_fcitx_config
 
-# 1. runtime files ------------------------------------------------------------
+# 2. runtime files ------------------------------------------------------------
+step 2 5 "Installing runtime files (backend + theme generator)"
 mkdir -p "$OMARIME_HOME/bin" "$OMARIME_HOME/themes"
 install -m 0755 "$SRC/bin/omarime-config" "$OMARIME_HOME/bin/"
 install -m 0755 "$SRC/themes/omarime-theme" "$OMARIME_HOME/themes/"
@@ -157,28 +220,36 @@ cp -r "$SRC/themes/template" "$OMARIME_HOME/themes/"
 mkdir -p "${HOME}/.config/omarchy/hooks/theme-set.d"
 install -m 0755 "$SRC/themes/hook-theme-set.sh" \
   "${HOME}/.config/omarchy/hooks/theme-set.d/omarime.sh"
+ok "runtime files in place"
 
-# Build the event bridge against this machine's fcitx5 ABI. The theme apply
-# below restarts fcitx5 once, which loads the new addon and systemd environment.
+# 3. event bridge — build against this machine's fcitx5 ABI. The theme apply
+#    below restarts fcitx5 once, which loads the new addon and systemd env.
+step 3 5 "Building event bridge (libomarime-state.so)"
 build_state_addon
+ok "addon built + installed"
 
-# 2. shell plugins ------------------------------------------------------------
+# 4. shell plugins ------------------------------------------------------------
+step 4 5 "Installing shell plugins (indicator + settings)"
 mkdir -p "$PLUGIN_DIR"
 for p in omarime.indicator omarime.settings; do
   staging="$PLUGIN_DIR/.${p}.install.$$"
   rm -rf "$staging"
   cp -r "$SRC/plugins/$p" "$staging"
-  omarchy plugin validate "$staging" >/dev/null || {
+  if ! omarchy plugin validate "$staging" >/dev/null; then
     rm -rf "$staging"
-    echo "omarime: plugin validation failed for $p" >&2; exit 1; }
+    printf '%s    \u2717 plugin validation failed for %s (source repo problem; nothing installed yet)%s\n' \
+      "$C_R" "$p" "$C_0"
+    exit 1
+  fi
   rm -rf "$PLUGIN_DIR/$p"
   mv "$staging" "$PLUGIN_DIR/$p"
+  ok "installed $p"
 done
 
-# 3. generate + apply the theme (also switches classicui Theme= safely) -------
+# 5. theme + activate ---------------------------------------------------------
+step 5 5 "Applying theme + activating plugins"
 "$OMARIME_HOME/themes/omarime-theme"
-
-# 4. plugin activation + bar placement (enable is idempotent) -----------------
+ok "theme applied"
 omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
 sleep 1
 omarchy plugin enable omarime.settings >/dev/null 2>&1 || \
