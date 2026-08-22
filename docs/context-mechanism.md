@@ -29,6 +29,43 @@
 「同拼音候选漂移」的主因是 **A**——关掉它，同一串拼音的候选就稳定了；
 B 是"长句里越打越准"的来源，保留；C 是"越用越懂你"，只加分不降分。
 
+### 一图看懂
+
+```mermaid
+flowchart TD
+    A["A 句间：上一句最后 2 词<br/>（contextWords_）"]
+    B["B 句内：本句已选词<br/>（selected_，恒开）"]
+    GATE{"KeepCurrentContext ?"}
+    OFF["句间断开：句首 prev = &lt;s&gt;<br/>打分与学习都不再跨句"]
+
+    A --> GATE
+    GATE -->|True| S
+    GATE -.->|False · omarime 默认| OFF
+    B --> S
+
+    S["② State（trigram 状态）<br/>= A + B 折叠后的最近 2 词<br/>PinyinContext::state()"]
+
+    S --> NODE["③ 束搜索 · 每个候选节点<br/>node.score = max(父分 + LM转移分) + 节点代价"]
+
+    NODE --> BASE["基础 E6 三阶<br/>zh_CN.lm · 读 state 的 2 词"]
+    NODE --> USER["用户历史 bigram<br/>user.history · 读最近 1 前词"]
+
+    W["C 强度<br/>w = UserModelWeight / 100"]
+    W -.->|插值权重| BASE
+    W -.->|插值权重| USER
+
+    BASE --> MIX["插值 = (1-w)·基础 + w·用户<br/>（log 空间）"]
+    USER --> MIX
+
+    BASE --> FINAL["④ LM.score = max( 基础分 , 插值 )<br/>→ 只加分不降分"]
+    MIX --> FINAL
+```
+
+读图：A、B 折进同一个 `State`（A 被 `KeepCurrentContext` 门控，B 恒开）；
+`State` 驱动束搜索，每个节点的 `LM.score` 又是「基础 E6」与「用户历史」的
+**只升不降**合成——基础分既是插值的一部分，又是 `max` 的兑底，所以用户历史
+永远不会把基础 LM 排对的词压下去。
+
 ---
 
 ## 1. 组件与文件位置
