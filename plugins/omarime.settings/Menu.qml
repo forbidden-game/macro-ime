@@ -297,6 +297,7 @@ Item {
               model: root.fuzzyPairs
 
               delegate: Rectangle {
+                id: fuzzyItem
                 required property var modelData
                 readonly property bool on: root.fuzzy[modelData.key] === true
 
@@ -320,7 +321,7 @@ Item {
                   anchors.centerIn: parent
                   text: modelData.label
                   color: Color.foreground
-                  opacity: root.on ? 1.0 : 0.75
+                  opacity: fuzzyItem.on ? 1.0 : 0.75
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }

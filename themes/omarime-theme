@@ -24,7 +24,7 @@
 #   --font FAMILY       override font family (default: fc-match monospace)
 #   --size PT           font size in points (default: 13)
 #   --border-width N    panel accent border width (default: 2, omarchy popup spec)
-#   --pill-alpha N      selected-candidate pill opacity % (default: 18)
+#   --pill-alpha N      selected-candidate pill opacity % (default: 30)
 #   --label-alpha N     candidate number label opacity % (default: 55)
 #   --dim-alpha N       page arrows / menu glyphs opacity % (default: 50)
 #   --sep-alpha N       menu separator opacity % (default: 25)
@@ -48,6 +48,17 @@ SIZE_FACTOR=85 VERTICAL="" NO_UI_CONF="" RELOAD="auto" QUIET="" DRY_RUN=""
 
 die() { echo "omarime-theme: $*" >&2; exit 1; }
 msg() { [[ -n $QUIET ]] || echo "omarime-theme: $*" >&2; }
+
+# If we stop fcitx5 to edit its config, we owe it a restart — even if a
+# later command fails or the script is interrupted.
+FCITX_NEED_RESTART=0
+theme_teardown() {
+  if (( FCITX_NEED_RESTART )); then
+    systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+    systemctl --user start omarchy-fcitx5.service 2>/dev/null || true
+  fi
+}
+trap theme_teardown EXIT
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -130,7 +141,6 @@ TEXT_ALPHA_HEX=$(hexalpha 100)   # preedit/candidate base text: full foreground
 LABEL_HEX=$(hexalpha "$LABEL_ALPHA")
 DIM_HEX=$(hexalpha "$DIM_ALPHA")
 SEP_HEX=$(hexalpha "$SEP_ALPHA")
-PILL_HEX=$(hexalpha "$PILL_ALPHA")
 
 render() { # render <src> <dst> [key=value ...]
   local src=$1 dst=$2 content kv
@@ -248,9 +258,12 @@ else
   # ⚠ fcitx5 writes its in-memory config back on exit: stop → edit → start.
   if svc_active && [[ $RELOAD != none ]]; then
     msg "switching Theme '$current_theme' → omarime (service restart to avoid config write-back)"
-    systemctl --user stop omarchy-fcitx5.service
+    systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
+    FCITX_NEED_RESTART=1
     apply_ui_conf
-    systemctl --user start omarchy-fcitx5.service
+    if systemctl --user start omarchy-fcitx5.service; then
+      FCITX_NEED_RESTART=0
+    fi
   else
     apply_ui_conf
     msg "updated $UI_CONF (service not running or --reload none)"
@@ -263,16 +276,21 @@ if [[ $RELOAD == none || -n $DRY_RUN ]]; then
 fi
 if svc_active; then
   case $RELOAD in
-    reload) fcitx5-remote -r >/dev/null 2>&1 || true ; msg "reloaded fcitx5 config" ;;
-    restart) systemctl --user restart omarchy-fcitx5.service ; msg "restarted fcitx5" ;;
-    auto|reload)
+    reload)
+      fcitx5-remote -r >/dev/null 2>&1 || true
+      msg "reloaded fcitx5 config" ;;
+    restart)
+      systemctl --user restart omarchy-fcitx5.service
+      msg "restarted fcitx5" ;;
+    auto|*)
       # classicui caches assets by theme name: a config reload does NOT re-read
       # regenerated SVG/theme.conf. A service restart is ~200ms and fully safe.
-      if svc_active && grep -q "^Theme=omarime$" "$UI_CONF" 2>/dev/null; then
+      if grep -q "^Theme=omarime$" "$UI_CONF" 2>/dev/null; then
         systemctl --user restart omarchy-fcitx5.service
         msg "restarted fcitx5 to load fresh theme assets"
-      elif [[ $RELOAD == reload ]]; then
-        fcitx5-remote -r >/dev/null 2>&1 || true ; msg "reloaded fcitx5 config"
+      else
+        fcitx5-remote -r >/dev/null 2>&1 || true
+        msg "reloaded fcitx5 config"
       fi
       ;;
   esac

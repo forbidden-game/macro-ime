@@ -14,6 +14,18 @@
 # All files go under user directories — no root, no /usr modification.
 # The LM is loaded via the LIBIME_MODEL_DIRS env var (systemd drop-in),
 # never by overwriting a system file.
+#
+# Transaction model:
+#   Everything that does not touch fcitx5 while it runs (downloads, addon
+#   files, runtime files, plugins) happens first. fcitx5 is stopped only for
+#   a short commit phase (config edit + LM copy), restarted, then verified
+#   (service active, addon loaded, state file written). If anything fails,
+#   on_error restarts fcitx5 so the machine is never left without an IME.
+#
+# Installed-model tracking: ~/.local/share/omarime/lib/model-manifest.json
+# records the release + sha256 of the installed LM. Reinstalls skip only when
+# the manifest matches the pinned release *and* the files verify; a VERSION
+# bump therefore really updates the model.
 set -Eeuo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +40,7 @@ BACKUP_DIR="$OMARIME_HOME/backup"
 STATE_ADDON_CONF="${HOME}/.local/share/fcitx5/addon/omarime-state.conf"
 FCITX_DROPIN="${HOME}/.config/systemd/user/omarchy-fcitx5.service.d/omarime-state.conf"
 RUNTIME_STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/${UID}}/omarime"
+MANIFEST="${OMARIME_LM_DIR}/model-manifest.json"
 GH_REPO="forbidden-game/omarime"
 
 LM_FILENAME="zh_CN.lm"
@@ -62,18 +75,22 @@ step() { printf '\n%s==> [%s/%s] %s%s\n' "$C_B" "$1" "$2" "$3" "$C_0"; }
 note() { printf '    %s\n' "$1"; }
 ok()   { printf '%s    \u2713 %s%s\n' "$C_G" "$1" "$C_0"; }
 
+# State of fcitx5 across the commit phase: 1 = we stopped it and owe a start.
+FCITX_NEED_RESTART=0
+# Re-entry guard for on_error (bash fires ERR twice for failures in $(...)).
+ERROR_HANDLED=0
+
 # --- functions (all defined before use) --------------------------------------
 
 require_commands() {
   local missing=() c
-  for c in omarchy omarchy-shell; do
+  for c in omarchy omarchy-shell fcitx5 fcitx5-remote jq busctl hyprctl fc-match; do
     command -v "$c" >/dev/null || missing+=("$c")
   done
-  # fcitx5 runtime (the IME framework): binary, or the Omarchy user unit.
-  if ! command -v fcitx5 >/dev/null && \
-     [[ ! -f "${HOME}/.config/systemd/user/omarchy-fcitx5.service" ]]; then
-    missing+=("fcitx5 (the IME framework; expected via omarchy-fcitx5.service)")
-  fi
+  # fcitx5-chinese-addons ships the pinyin engine that omarime builds on.
+  # Without it the LM would never be used.
+  [[ -f /usr/share/fcitx5/addon/pinyin.conf ]] || \
+    missing+=("fcitx5-chinese-addons (pinyin addon) — install with: omarchy pkg add fcitx5-chinese-addons")
   # Build tools only when we actually have to compile the addon from source.
   if [[ ! -f "${SRC}/dist/libomarime-state.so" ]]; then
     pkg-config --exists 'Fcitx5Core >= 5.1' 2>/dev/null || \
@@ -94,10 +111,33 @@ require_commands() {
 on_error() {
   local code=$? line=$1
   trap - ERR
+  # bash's set -E makes the ERR trap fire TWICE for a failure inside $(...):
+  # once in the command-substitution subshell, once in the parent. The
+  # subshell must stay silent — the parent runs the real handler.
+  if (( BASH_SUBSHELL > 0 )); then
+    exit "$code"
+  fi
+  if (( ERROR_HANDLED )); then
+    exit "$code"
+  fi
+  ERROR_HANDLED=1
   printf '\n%s✗ omarime: install failed (exit %s, near line %s).%s\n' \
     "$C_R" "$code" "$line" "$C_0" >&2
+  # Never leave the machine without an input method: if we stopped fcitx5
+  # during the commit phase and it is not running, bring it back.
+  if (( FCITX_NEED_RESTART )) && ! service_running; then
+    systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+    if systemctl --user start omarchy-fcitx5.service 2>/dev/null; then
+      FCITX_NEED_RESTART=0
+      printf '  fcitx5 was stopped mid-install; it has been started again.%s\n' "$C_0" >&2
+    else
+      printf '  fcitx5 was stopped mid-install and could NOT be restarted —%s\n' "$C_0" >&2
+      printf '    run: systemctl --user start omarchy-fcitx5.service%s\n' "$C_0" >&2
+    fi
+  fi
   printf '  A partial install may remain on this machine. Roll everything back with:\n' >&2
   printf '      %s --undo\n' "$0" >&2
+  [[ -n "$LM_DL_DIR" ]] && rm -rf "$LM_DL_DIR"
   exit "$code"
 }
 
@@ -109,12 +149,24 @@ service_running() {
 }
 
 stop_fcitx() {
-  systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
-  pkill -x fcitx5 2>/dev/null || true
+  # Stop fcitx5 and remember that we owe a restart (sets FCITX_NEED_RESTART).
+  if service_running; then
+    systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
+    pkill -x fcitx5 2>/dev/null || true
+    FCITX_NEED_RESTART=1
+  fi
   # The 463MB LM is memory-mapped; give the process time to unmap + exit.
   for _ in {1..150}; do pgrep -x fcitx5 >/dev/null || return 0; sleep 0.1; done
   echo "omarime: fcitx5 did not stop within 15s" >&2
   return 1
+}
+
+restart_fcitx() {
+  if (( FCITX_NEED_RESTART )); then
+    systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+    systemctl --user start omarchy-fcitx5.service
+    FCITX_NEED_RESTART=0
+  fi
 }
 
 restore_file() {
@@ -129,15 +181,25 @@ restore_file() {
 
 backup_file_once() {
   local source=$1 backup=$2
+  mkdir -p "$BACKUP_DIR"
   [[ -e "$BACKUP_DIR/$backup" || -e "$BACKUP_DIR/$backup.missing" ]] && return
   if [[ -f $source ]]; then cp "$source" "$BACKUP_DIR/$backup"
   else touch "$BACKUP_DIR/$backup.missing"
   fi
 }
 
+restore_plugin_dir() {
+  local p=$1
+  local dst="${PLUGIN_DIR:?}/$p"
+  if [[ -e "$BACKUP_DIR/plugin-$p" ]]; then
+    rm -rf "$dst"
+    cp -r "$BACKUP_DIR/plugin-$p" "$dst"
+  else
+    rm -rf "$dst"
+  fi
+}
+
 undo() {
-  local was_active=0
-  service_running && was_active=1
   step 1 3 "Stopping fcitx5"
   if ! stop_fcitx; then
     printf '%s✗ fcitx5 is still running; aborting undo to protect live files.%s\n' "$C_R" "$C_0" >&2
@@ -149,63 +211,33 @@ undo() {
   restore_file classicui.conf "$UI_CONF"
   restore_file config "$CORE_CONF"
   restore_file pinyin.conf "$PY_CONF"
-  ok "config restored"
-  step 3 3 "Disabling plugins + removing installed files"
-  omarchy plugin disable omarime.indicator >/dev/null 2>&1 || true
-  omarchy plugin disable omarime.settings >/dev/null 2>&1 || true
   restore_file state-addon.conf "$STATE_ADDON_CONF"
   restore_file fcitx-dropin.conf "$FCITX_DROPIN"
+  ok "config restored"
+  step 3 3 "Removing installed files + restoring pre-install plugin state"
+  omarchy plugin disable omarime.indicator >/dev/null 2>&1 || true
+  omarchy plugin disable omarime.settings >/dev/null 2>&1 || true
+  restore_plugin_dir omarime.indicator
+  restore_plugin_dir omarime.settings
+  # Restore enable state recorded before install (placement is not recorded
+  # by omarchy; we remount on the center, as install does).
+  if [[ -f "$BACKUP_DIR/plugin-state.json" ]]; then
+    if [[ $(jq -r '.[] | select(.id == "omarime.indicator") | .enabled // false' \
+          "$BACKUP_DIR/plugin-state.json" 2>/dev/null) == true ]]; then
+      omarchy plugin enable omarime.indicator center >/dev/null 2>&1 || true
+    fi
+    if [[ $(jq -r '.[] | select(.id == "omarime.settings") | .enabled // false' \
+          "$BACKUP_DIR/plugin-state.json" 2>/dev/null) == true ]]; then
+      omarchy plugin enable omarime.settings >/dev/null 2>&1 || true
+    fi
+  fi
   rm -rf "$OMARIME_HOME" \
          "$HOME/.local/share/fcitx5/themes/omarime" \
          "$HOME/.config/omarchy/hooks/theme-set.d/omarime.sh" \
-         "$PLUGIN_DIR/omarime.indicator" \
-         "$PLUGIN_DIR/omarime.settings" \
          "$RUNTIME_STATE_DIR"
   systemctl --user daemon-reload
-  if (( was_active )); then
-    systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
-    systemctl --user start omarchy-fcitx5.service
-  fi
+  restart_fcitx
   ok "removed; fcitx5 config restored to its pre-install state"
-}
-
-prepare_fcitx_config() {
-  local tmp
-  stop_fcitx
-  note "backing up current fcitx5 config"
-  mkdir -p "$BACKUP_DIR"
-  backup_file_once "$UI_CONF" classicui.conf
-  backup_file_once "$CORE_CONF" config
-  backup_file_once "$PY_CONF" pinyin.conf
-
-  mkdir -p "$(dirname "$CORE_CONF")"
-  [[ -f $CORE_CONF ]] || : >"$CORE_CONF"
-  tmp=$(mktemp "$(dirname "$CORE_CONF")/.config.XXXXXX")
-  if grep -q '^PreeditEnabledByDefault=' "$CORE_CONF"; then
-    sed 's/^PreeditEnabledByDefault=.*/PreeditEnabledByDefault=False/' "$CORE_CONF" >"$tmp"
-  elif grep -q '^\[Behavior\]$' "$CORE_CONF"; then
-    sed '/^\[Behavior\]$/a PreeditEnabledByDefault=False' "$CORE_CONF" >"$tmp"
-  else
-    cat "$CORE_CONF" >"$tmp"
-    printf '\n[Behavior]\nPreeditEnabledByDefault=False\n' >>"$tmp"
-  fi
-  mv "$tmp" "$CORE_CONF"
-  note "config updated (PreeditEnabledByDefault=False)"
-
-  mkdir -p "$(dirname "$PY_CONF")"
-  [[ -f $PY_CONF ]] || : >"$PY_CONF"
-  tmp=$(mktemp "$(dirname "$PY_CONF")/.pinyin.XXXXXX")
-  if grep -q '^KeepCurrentContext=' "$PY_CONF"; then
-    sed 's/^KeepCurrentContext=.*/KeepCurrentContext=False/' "$PY_CONF" >"$tmp"
-  else
-    cat "$PY_CONF" >"$tmp"
-    printf 'KeepCurrentContext=False\n' >>"$tmp"
-  fi
-  mv "$tmp" "$PY_CONF"
-  note "pinyin default: cross-sentence context off (KeepCurrentContext=False)"
-  # fcitx5 stays stopped here. It is (re)started once, at the end, after the
-  # systemd drop-in is in place, so the new env vars actually take effect.
-  ok "fcitx5 config ready (service stays stopped until the final step)"
 }
 
 load_version() {
@@ -226,16 +258,28 @@ gh_release_digest() {
     2>/dev/null || true
 }
 
-verify_lm_integrity() {
+# Strict sha256 check — fail-closed: an unavailable digest is an error, not a
+# pass. Used for downloads from the pinned release.
+assert_sha256() {
   local file=$1 expected=$2 label=$3
-  local actual size
+  local actual
+  if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "omarime: no sha256 digest available for ${label} (release ${RELEASE_TAG} API?)" >&2
+    return 1
+  fi
   actual=$(sha256sum "$file" | cut -d' ' -f1)
-  if [[ -n "$expected" && "$actual" != "$expected" ]]; then
+  if [[ "$actual" != "$expected" ]]; then
     echo "omarime: sha256 mismatch for ${label}" >&2
     echo "  expected: $expected" >&2
     echo "  actual:   $actual" >&2
     return 1
   fi
+}
+
+# Loose sanity check for local files (--lm-file / dist): size only.
+check_lm_size() {
+  local file=$1 label=$2
+  local size
   size=$(stat -c%s "$file")
   if [[ "$label" == "$LM_FILENAME" && "$size" -lt 100000000 ]]; then
     echo "omarime: ${label} is only ${size} bytes (expected ~463MB); looks truncated" >&2
@@ -243,44 +287,80 @@ verify_lm_integrity() {
   fi
 }
 
-install_language_model() {
+# --- language model ----------------------------------------------------------
+# Resolution happens up-front (downloads/verification) with no effect on the
+# live tree; the actual copy + manifest are committed in the commit phase.
+LM_SRC=""
+LM_PREDICT_SRC=""
+LM_SOURCE=""          # release | lm-file | dist
+LM_DL_DIR=""          # temp download dir, kept until commit copies the files
+commit_manifest_only=0  # 1 = files already match this release; just write the manifest
+
+prepare_language_model() {
   if (( SKIP_LM )); then
     note "skipped (--skip-lm)"
     ok "language model skipped"
     return 0
   fi
 
-  mkdir -p "$OMARIME_LM_DIR"
   local lm_dest="${OMARIME_LM_DIR}/${LM_FILENAME}"
   local predict_dest="${OMARIME_LM_DIR}/${LM_PREDICT_FILENAME}"
 
-  if [[ -f "$lm_dest" && -f "$predict_dest" ]]; then
-    note "LM already installed at $lm_dest ($(du -h "$lm_dest" | cut -f1))"
-    ok "language model in place"
-    return 0
+  # --- 1. Already installed and verified against this release? skip.
+  if [[ -f "$MANIFEST" && -f "$lm_dest" ]]; then
+    local mrel msrc lmh prh
+    mrel=$(jq -r '.release // ""' "$MANIFEST" 2>/dev/null || true)
+    msrc=$(jq -r '.source // ""' "$MANIFEST" 2>/dev/null || true)
+    lmh=$(jq -r '.files["zh_CN.lm"].sha256 // ""' "$MANIFEST" 2>/dev/null || true)
+    prh=$(jq -r '.files["zh_CN.lm.predict"].sha256 // ""' "$MANIFEST" 2>/dev/null || true)
+    if [[ "$mrel" == "$RELEASE_TAG" && "$msrc" == "release" && \
+          "$lmh" == "$(sha256sum "$lm_dest" | cut -d' ' -f1)" && \
+          -f "$predict_dest" && "$prh" == "$(sha256sum "$predict_dest" | cut -d' ' -f1)" ]]; then
+      note "LM already installed and verified (release ${RELEASE_TAG})"
+      ok "language model in place"
+      return 0
+    fi
   fi
 
-  local lm_src="" predict_src="" dl_dir=""
-  local exp_lm="" exp_pred=""
+  # --- 2. Migration: files exist and match this release's digest? Then just
+  #        (re)write the manifest — no 463MB re-download.
+  if [[ -f "$lm_dest" && -f "$predict_dest" ]]; then
+    local rd rp
+    rd=$(gh_release_digest "$LM_FILENAME")
+    rp=$(gh_release_digest "$LM_PREDICT_FILENAME")
+    if [[ -n "$rd" && \
+          "$rd" == "$(sha256sum "$lm_dest" | cut -d' ' -f1)" && \
+          "$rp" == "$(sha256sum "$predict_dest" | cut -d' ' -f1)" ]]; then
+      commit_manifest_only=1
+      LM_SOURCE="release"
+      note "existing LM matches release ${RELEASE_TAG} — just updating the manifest"
+      ok "language model verified against release ${RELEASE_TAG}"
+      return 0
+    fi
+  fi
 
+  # --- 3. Resolve a source: --lm-file / dist / pinned release download.
   if [[ -n "$LM_FILE" ]]; then
-    lm_src="$LM_FILE"
-    predict_src="${lm_src}.predict"
-    if [[ ! -f "$lm_src" ]]; then
-      echo "omarime: LM file not found: $lm_src" >&2
+    if [[ ! -f "$LM_FILE" ]]; then
+      echo "omarime: LM file not found: $LM_FILE" >&2
       return 1
     fi
-    if [[ ! -f "$predict_src" ]]; then
-      note "warning: no ${LM_PREDICT_FILENAME} next to $lm_src — cloud-pinyin prediction will be off"
+    LM_SRC="$LM_FILE"
+    LM_PREDICT_SRC="${LM_FILE}.predict"
+    if [[ ! -f "$LM_PREDICT_SRC" ]]; then
+      note "warning: no ${LM_PREDICT_FILENAME} next to $LM_FILE — cloud-pinyin prediction will be off"
+      LM_PREDICT_SRC=""
     fi
-    note "using LM from: $lm_src"
+    LM_SOURCE="lm-file"
+    check_lm_size "$LM_SRC" "$LM_FILENAME" || return 1
+    note "using LM from: $LM_SRC (not verified against the release digest)"
   elif [[ -f "${SRC}/dist/${LM_FILENAME}" ]]; then
-    lm_src="${SRC}/dist/${LM_FILENAME}"
-    predict_src="${SRC}/dist/${LM_PREDICT_FILENAME}"
-    if [[ ! -f "$predict_src" ]]; then
-      note "warning: no ${LM_PREDICT_FILENAME} in dist/ — cloud-pinyin prediction will be off"
-    fi
-    note "using LM from repo dist/ directory"
+    LM_SRC="${SRC}/dist/${LM_FILENAME}"
+    LM_PREDICT_SRC="${SRC}/dist/${LM_PREDICT_FILENAME}"
+    [[ -f "$LM_PREDICT_SRC" ]] || LM_PREDICT_SRC=""
+    LM_SOURCE="dist"
+    check_lm_size "$LM_SRC" "$LM_FILENAME" || return 1
+    note "using LM from repo dist/ directory (not verified against the release digest)"
   else
     if (( OFFLINE )); then
       echo "omarime: LM not found locally and --offline is set." >&2
@@ -292,49 +372,81 @@ install_language_model() {
       echo "  private release. Run 'gh auth login' first, or use --lm-file <path>." >&2
       return 1
     fi
-    dl_dir=$(mktemp -d)
+    LM_DL_DIR=$(mktemp -d)
     note "downloading language model from release ${RELEASE_TAG} (~463MB)…"
     gh release download "$RELEASE_TAG" --repo "$GH_REPO" \
-      --pattern "$LM_FILENAME" --pattern "$LM_PREDICT_FILENAME" --dir "$dl_dir" \
+      --pattern "$LM_FILENAME" --pattern "$LM_PREDICT_FILENAME" --dir "$LM_DL_DIR" \
       2>/dev/null || {
       echo "omarime: download from ${RELEASE_TAG} failed." >&2
       echo "  Check the release exists + your gh auth, or use --lm-file." >&2
-      rm -rf "$dl_dir"; return 1
+      rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1
     }
-    lm_src="${dl_dir}/${LM_FILENAME}"
-    predict_src="${dl_dir}/${LM_PREDICT_FILENAME}"
-    if [[ ! -f "$lm_src" ]]; then
+    LM_SRC="${LM_DL_DIR}/${LM_FILENAME}"
+    LM_PREDICT_SRC="${LM_DL_DIR}/${LM_PREDICT_FILENAME}"
+    if [[ ! -f "$LM_SRC" ]]; then
       echo "omarime: LM file missing after download" >&2
-      rm -rf "$dl_dir"; return 1
+      rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1
     fi
-    # Integrity: verify against the release's recorded sha256 digest.
+    LM_SOURCE="release"
+    # Fail-closed verification against the release's recorded sha256.
+    local exp_lm exp_pred
     exp_lm=$(gh_release_digest "$LM_FILENAME")
     exp_pred=$(gh_release_digest "$LM_PREDICT_FILENAME")
-    if ! verify_lm_integrity "$lm_src" "$exp_lm" "$LM_FILENAME"; then
-      rm -rf "$dl_dir"; return 1
-    fi
-    if [[ -f "$predict_src" ]]; then
-      if ! verify_lm_integrity "$predict_src" "$exp_pred" "$LM_PREDICT_FILENAME"; then
-        rm -rf "$dl_dir"; return 1
-      fi
+    assert_sha256 "$LM_SRC" "$exp_lm" "$LM_FILENAME" \
+      || { rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1; }
+    if [[ -f "$LM_PREDICT_SRC" ]]; then
+      assert_sha256 "$LM_PREDICT_SRC" "$exp_pred" "$LM_PREDICT_FILENAME" \
+        || { rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1; }
+    else
+      note "warning: ${LM_PREDICT_FILENAME} not present in the release — skipping"
+      LM_PREDICT_SRC=""
     fi
   fi
 
-  # Size sanity for all paths (download path already verified sha256 above).
-  verify_lm_integrity "$lm_src" "" "$LM_FILENAME" || return 1
-
-  note "installing to $OMARIME_LM_DIR/"
-  cp "$lm_src" "$lm_dest"
-  if [[ -f "$predict_src" ]]; then
-    cp "$predict_src" "$predict_dest"
-  fi
-
-  # Only remove a temp download dir we created — never dist/ or --lm-file.
-  [[ -n "$dl_dir" ]] && rm -rf "$dl_dir"
-
-  ok "language model installed ($(du -h "$lm_dest" | cut -f1))"
+  ok "language model ready (source: ${LM_SOURCE})"
 }
 
+# Commit-phase: copy the staged LM into place and write the manifest.
+commit_language_model() {
+  local lm_dest="${OMARIME_LM_DIR}/${LM_FILENAME}"
+  local predict_dest="${OMARIME_LM_DIR}/${LM_PREDICT_FILENAME}"
+
+  if (( commit_manifest_only )); then
+    write_manifest "$lm_dest" "$predict_dest"
+    return 0
+  fi
+  [[ -z "$LM_SRC" ]] && return 0
+
+  mkdir -p "$OMARIME_LM_DIR"
+  cp "$LM_SRC" "$lm_dest"
+  if [[ -n "$LM_PREDICT_SRC" ]]; then
+    cp "$LM_PREDICT_SRC" "$predict_dest"
+  fi
+  write_manifest "$lm_dest" "$predict_dest"
+  note "language model installed ($(du -h "$lm_dest" | cut -f1))"
+}
+
+write_manifest() {
+  local lm_dest=$1 predict_dest=$2
+  local lmh lmb pr prb files_json
+  lmh=$(sha256sum "$lm_dest" | cut -d' ' -f1)
+  lmb=$(stat -c%s "$lm_dest")
+  pr=""; prb=""
+  if [[ -f "$predict_dest" ]]; then
+    pr=$(sha256sum "$predict_dest" | cut -d' ' -f1)
+    prb=$(stat -c%s "$predict_dest")
+  fi
+  files_json=$(jq -nc \
+    --arg lm "$lmh" --arg lmb "$lmb" --arg pr "$pr" --arg prb "$prb" \
+    '{"zh_CN.lm":{sha256:$lm, bytes:($lmb|tonumber)}} + (if $pr != "" then {"zh_CN.lm.predict":{sha256:$pr, bytes:($prb|tonumber)}} else {} end)')
+  jq -n --arg release "$RELEASE_TAG" --arg source "$LM_SOURCE" \
+    --argjson files "$files_json" \
+    '{release:$release, source:$source, files:$files}' >"${MANIFEST}.tmp"
+  mv "${MANIFEST}.tmp" "$MANIFEST"
+  note "model manifest updated (${MANIFEST})"
+}
+
+# --- addon -------------------------------------------------------------------
 install_addon() {
   local addon_dest="${OMARIME_LIB}/fcitx5/libomarime-state.so"
   mkdir -p "$(dirname "$addon_dest")" "$(dirname "$STATE_ADDON_CONF")" \
@@ -343,9 +455,29 @@ install_addon() {
   backup_file_once "$STATE_ADDON_CONF" state-addon.conf
   backup_file_once "$FCITX_DROPIN" fcitx-dropin.conf
 
-  if [[ -f "${SRC}/dist/libomarime-state.so" ]]; then
-    install -m 0755 "${SRC}/dist/libomarime-state.so" "$addon_dest"
-    note "installed pre-built addon"
+  # ABI preflight: the pre-built .so must resolve against this machine's
+  # fcitx5. On failure fall back to compiling from source.
+  local so="${SRC}/dist/libomarime-state.so"
+  if [[ -f "$so" ]]; then
+    local bad
+    bad=$(ldd -r "$so" 2>&1 | grep -E "not found|undefined symbol" || true)
+    if [[ -n "$bad" ]]; then
+      note "pre-built addon has unresolved ABI on this machine:"
+      while IFS= read -r l; do note "  $l"; done <<<"$bad"
+      if command -v cmake >/dev/null; then
+        note "building from source instead (local fcitx5 ABI)"
+        build_state_addon_to "$addon_dest"
+        ok "event addon built from source"
+      else
+        echo "omarime: pre-built addon ABI mismatch and no build toolchain." >&2
+        echo "  Install cmake + Fcitx5Core headers, or use an Omarchy release" >&2
+        echo "  that matches this fcitx5." >&2
+        return 1
+      fi
+    else
+      install -m 0755 "$so" "$addon_dest"
+      note "installed pre-built addon (ABI ok)"
+    fi
   else
     if ! command -v cmake >/dev/null; then
       echo "omarime: no pre-built addon in dist/ and cmake not available." >&2
@@ -376,7 +508,6 @@ EOF
 Environment="FCITX_ADDON_DIRS=%h/.local/share/omarime/lib/fcitx5:/usr/lib/fcitx5"
 Environment="LIBIME_MODEL_DIRS=%h/.local/share/omarime/lib"
 EOF
-  systemctl --user daemon-reload
   ok "event addon installed"
 }
 
@@ -395,6 +526,7 @@ build_state_addon_to() {
   rm -rf "$build_dir"
 }
 
+# --- runtime + plugins -------------------------------------------------------
 install_runtime() {
   mkdir -p "$OMARIME_HOME/bin" "$OMARIME_HOME/themes"
   install -m 0755 "$SRC/bin/omarime-config" "$OMARIME_HOME/bin/"
@@ -411,6 +543,12 @@ install_plugins() {
   mkdir -p "$PLUGIN_DIR"
   local p staging
   for p in omarime.indicator omarime.settings; do
+    # Preserve any pre-existing plugin dir so --undo can restore it fully
+    # (e.g. a user-customized clone from an earlier install).
+    if [[ -d "$PLUGIN_DIR/$p" && ! -e "$BACKUP_DIR/plugin-$p" ]]; then
+      cp -r "$PLUGIN_DIR/$p" "$BACKUP_DIR/plugin-$p"
+      note "backed up existing $p (restored by --undo)"
+    fi
     staging="$PLUGIN_DIR/.${p}.install.$$"
     rm -rf "$staging"
     cp -r "$SRC/plugins/$p" "$staging"
@@ -423,18 +561,81 @@ install_plugins() {
     mv "$staging" "${PLUGIN_DIR:?}/$p"
     ok "installed $p"
   done
+  # Record enable state for --undo to restore.
+  omarchy plugin list --json >"$BACKUP_DIR/plugin-state.json" 2>/dev/null || true
+}
+
+# --- commit phase (fcitx5 stopped for the shortest possible window) ----------
+prepare_fcitx_config() {
+  local tmp
+  note "backing up + editing fcitx5 config"
+  mkdir -p "$BACKUP_DIR"
+  backup_file_once "$UI_CONF" classicui.conf
+  backup_file_once "$CORE_CONF" config
+  backup_file_once "$PY_CONF" pinyin.conf
+
+  mkdir -p "$(dirname "$CORE_CONF")"
+  [[ -f $CORE_CONF ]] || : >"$CORE_CONF"
+  tmp=$(mktemp "$(dirname "$CORE_CONF")/.config.XXXXXX")
+  if grep -q '^PreeditEnabledByDefault=' "$CORE_CONF"; then
+    sed 's/^PreeditEnabledByDefault=.*/PreeditEnabledByDefault=False/' "$CORE_CONF" >"$tmp"
+  elif grep -q '^\[Behavior\]$' "$CORE_CONF"; then
+    sed '/^\[Behavior\]$/a PreeditEnabledByDefault=False' "$CORE_CONF" >"$tmp"
+  else
+    cat "$CORE_CONF" >"$tmp"
+    printf '\n[Behavior]\nPreeditEnabledByDefault=False\n' >>"$tmp"
+  fi
+  mv "$tmp" "$CORE_CONF"
+  note "config updated (PreeditEnabledByDefault=False)"
+
+  mkdir -p "$(dirname "$PY_CONF")"
+  [[ -f $PY_CONF ]] || : >"$PY_CONF"
+  tmp=$(mktemp "$(dirname "$PY_CONF")/.pinyin.XXXXXX")
+  if grep -q '^KeepCurrentContext=' "$PY_CONF"; then
+    sed 's/^KeepCurrentContext=.*/KeepCurrentContext=False/' "$PY_CONF" >"$tmp"
+  else
+    cat "$PY_CONF" >"$tmp"
+    printf 'KeepCurrentContext=False\n' >>"$tmp"
+  fi
+  mv "$tmp" "$PY_CONF"
+  note "pinyin default: cross-sentence context off (KeepCurrentContext=False)"
+}
+
+commit_fcitx_config() {
+  stop_fcitx
+  prepare_fcitx_config
+  commit_language_model
+  systemctl --user daemon-reload
+  restart_fcitx
+  ok "config committed; fcitx5 restarted with LIBIME_MODEL_DIRS + FCITX_ADDON_DIRS"
+}
+
+# Post-install verification: the service must run, the addon must load, and
+# the state bridge must be writing. Failure here fails the install.
+health_check() {
+  local journal
+  sleep 1
+  if ! systemctl --user is-active --quiet omarchy-fcitx5.service; then
+    echo "omarime: fcitx5 is not active after install (health check 1/3)" >&2
+    return 1
+  fi
+  journal=$(journalctl --user -u omarchy-fcitx5.service --since "2 min ago" 2>/dev/null || true)
+  if ! grep -q "Loaded addon omarime-state" <<<"$journal"; then
+    echo "omarime: state addon did not load (health check 2/3)" >&2
+    echo "  journal: journalctl --user -u omarchy-fcitx5.service -n 80" >&2
+    return 1
+  fi
+  if [[ ! -s "$RUNTIME_STATE_DIR/state" ]]; then
+    echo "omarime: state file not written (health check 3/3)" >&2
+    echo "  expected: $RUNTIME_STATE_DIR/state" >&2
+    return 1
+  fi
+  ok "health check passed: service active, addon loaded, state file live"
 }
 
 apply_and_activate() {
-  # Restart fcitx first so it loads the LM dir + state addon with the new env.
-  if (( FCITX_WAS_ACTIVE )); then
-    systemctl --user restart omarchy-fcitx5.service 2>/dev/null || \
-      systemctl --user start omarchy-fcitx5.service 2>/dev/null || true
-    note "fcitx5 restarted (LIBIME_MODEL_DIRS + FCITX_ADDON_DIRS active)"
-  else
-    note "fcitx5 was not running — start it later with:"
-    note "  systemctl --user start omarchy-fcitx5.service"
-  fi
+  health_check || return 1
+
   "$OMARIME_HOME/themes/omarime-theme"
   ok "theme applied"
   omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
@@ -445,6 +646,11 @@ apply_and_activate() {
     echo "omarime: add indicator manually: omarchy plugin enable omarime.indicator center"
   sleep 2
   omarchy restart shell >/dev/null 2>&1 || true
+  # The theme script may have cycled fcitx5 again; confirm it is alive.
+  if ! systemctl --user is-active --quiet omarchy-fcitx5.service; then
+    echo "omarime: fcitx5 is not active after theme application" >&2
+    return 1
+  fi
 }
 
 # --- main --------------------------------------------------------------------
@@ -452,32 +658,36 @@ apply_and_activate() {
 
 require_commands
 
+# Backup dir is the undo contract; it must exist before any backup_file_once.
+mkdir -p "$BACKUP_DIR"
+
 load_version
 
 trap 'on_error $LINENO' ERR
 
-FCITX_WAS_ACTIVE=0
-service_running && FCITX_WAS_ACTIVE=1
-
 echo "omarime: installing Omarchy-native Chinese IME experience (release ${RELEASE_TAG})"
 
 TOTAL=6
-step 1 $TOTAL "Preparing fcitx5 config"
-prepare_fcitx_config
-step 2 $TOTAL "Installing language model"
-install_language_model
-step 3 $TOTAL "Installing event addon (libomarime-state.so)"
+step 1 $TOTAL "Preparing language model"
+prepare_language_model
+step 2 $TOTAL "Installing event addon (libomarime-state.so)"
 install_addon
-step 4 $TOTAL "Installing runtime files (backend + theme generator)"
+step 3 $TOTAL "Installing runtime files (backend + theme generator)"
 install_runtime
-step 5 $TOTAL "Installing shell plugins (indicator + settings)"
+step 4 $TOTAL "Installing shell plugins (indicator + settings)"
 install_plugins
+step 5 $TOTAL "Committing fcitx5 config (stop → edit → restart)"
+commit_fcitx_config
 step 6 $TOTAL "Applying theme + activating plugins"
 apply_and_activate
+
+# Clean up the temp download dir (kept alive through the commit phase).
+[[ -n "$LM_DL_DIR" ]] && rm -rf "$LM_DL_DIR"
 
 echo
 echo "omarime installed (release ${RELEASE_TAG}):"
 echo "  language model   ${OMARIME_LM_DIR}/${LM_FILENAME} (via LIBIME_MODEL_DIRS)"
+echo "                   tracked in ${MANIFEST} (verified against release ${RELEASE_TAG})"
 echo "  candidate window follows the active omarchy theme"
 echo "  bar indicator    event-driven 中/EN · left-click toggle · right-click settings"
 echo "  settings panel   fuzzy pairs, correction, vertical list, cloud pinyin,"

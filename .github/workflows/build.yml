@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify pre-built addon (arch + staleness)
+      - name: Verify pre-built addon (arch, ABI deps, staleness)
         run: |
           test -f dist/libomarime-state.so || {
             echo "ERROR: dist/libomarime-state.so not found"
@@ -25,22 +25,33 @@ jobs:
           readelf -h dist/libomarime-state.so | grep -q "Shared object"
           readelf -h dist/libomarime-state.so | grep -q "X86-64"
           echo "OK: addon is a valid x86-64 ELF shared object"
+          # The addon must only depend on fcitx5 runtime libs this project
+          # expects (ABI contract: libFcitx5Core.so.7, Config.so.6, Utils.so.2).
+          needed=$(readelf -d dist/libomarime-state.so | grep NEEDED)
+          for lib in libFcitx5Core.so.7 libFcitx5Config.so.6 libFcitx5Utils.so.2; do
+            echo "$needed" | grep -q "$lib" || { echo "ERROR: missing expected NEEDED dependency: $lib"; exit 1; }
+          done
+          echo "OK: addon ABI dependency set as expected"
           # Staleness: the committed .so must have been built from the
-          # currently committed source (hash recorded at build time).
+          # currently committed sources (aggregated hash recorded at build time:
+          # cpp + CMakeLists + conf.in).
           test -f dist/libomarime-state.so.src || {
             echo "ERROR: dist/libomarime-state.so.src (source hash sidecar) missing"
-            echo "Regenerate: sha256sum engine/omarime-state/omarime-state.cpp | cut -d' ' -f1 > dist/libomarime-state.so.src"
+            echo "Regenerate: sha256sum engine/omarime-state/omarime-state.cpp engine/omarime-state/CMakeLists.txt engine/omarime-state/omarime-state.conf.in | sha256sum | cut -d' ' -f1 > dist/libomarime-state.so.src"
             exit 1
           }
           recorded=$(tr -d '[:space:]' < dist/libomarime-state.so.src)
-          actual=$(sha256sum engine/omarime-state/omarime-state.cpp | cut -d' ' -f1)
+          actual=$(sha256sum engine/omarime-state/omarime-state.cpp \
+                             engine/omarime-state/CMakeLists.txt \
+                             engine/omarime-state/omarime-state.conf.in \
+                   | sha256sum | cut -d' ' -f1)
           if [[ "$recorded" != "$actual" ]]; then
-            echo "ERROR: dist/libomarime-state.so is STALE — engine/omarime-state/omarime-state.cpp changed since the addon was built."
+            echo "ERROR: dist/libomarime-state.so is STALE — addon sources changed since it was built."
             echo "Rebuild: cmake -S engine/omarime-state -B build && cmake --build build && cp build/libomarime-state.so dist/"
-            echo "  then regenerate the sidecar (sha256sum ... > dist/libomarime-state.so.src)"
+            echo "  then regenerate the sidecar (see instructions above)"
             exit 1
           fi
-          echo "OK: addon matches current source (staleness check passed)"
+          echo "OK: addon matches current sources (staleness check passed)"
 
       - name: Verify repo structure
         run: |
@@ -53,15 +64,17 @@ jobs:
           done
           echo "OK: all required files present"
 
-      - name: Lint install.sh
+      - name: Lint all shell scripts (syntax)
         run: |
-          bash -n install.sh
-          echo "OK: install.sh syntax valid"
+          for s in install.sh bin/omarime-config themes/omarime-theme themes/hook-theme-set.sh; do
+            bash -n "$s" || { echo "ERROR: syntax error in $s"; exit 1; }
+          done
+          echo "OK: syntax valid"
 
-      - name: shellcheck install.sh
+      - name: shellcheck all shell scripts
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck install.sh
+          shellcheck install.sh bin/omarime-config themes/omarime-theme themes/hook-theme-set.sh
           echo "OK: shellcheck clean"
 
       - name: Smoke test install.sh (executable paths)
@@ -78,11 +91,12 @@ jobs:
           #    main section (v0.1.0 shipped with call-before-definition -> exit 127).
           head -n "$(grep -n '^# --- main' install.sh | cut -d: -f1)" install.sh > /tmp/defs.sh
           bash -c 'source /tmp/defs.sh
-          for f in require_commands load_version on_error service_running stop_fcitx \
-                   restore_file backup_file_once undo prepare_fcitx_config \
-                   gh_release_digest verify_lm_integrity install_language_model \
-                   install_addon build_state_addon_to install_runtime \
-                   install_plugins apply_and_activate; do
+          for f in require_commands on_error service_running stop_fcitx restart_fcitx \
+                   restore_file backup_file_once restore_plugin_dir undo load_version \
+                   gh_release_digest assert_sha256 check_lm_size prepare_language_model \
+                   commit_language_model write_manifest install_addon build_state_addon_to \
+                   install_runtime install_plugins prepare_fcitx_config \
+                   commit_fcitx_config health_check apply_and_activate; do
             declare -F "$f" > /dev/null || { echo "MISSING before main: $f"; exit 1; }
           done'
           echo "OK: all step functions defined before main"

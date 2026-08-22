@@ -13,6 +13,7 @@
 ├── lib/
 │   ├── zh_CN.lm              # E6 语言模型 (463MB)
 │   ├── zh_CN.lm.predict      # 预测索引 (3.9MB)
+│   ├── model-manifest.json   # 已安装模型版本+sha256 (更新判定依据)
 │   └── fcitx5/
 │       └── libomarime-state.so  # 事件 addon (预编译)
 ├── bin/
@@ -62,13 +63,16 @@ cd omarime
 ```
 
 install.sh 自动：
-1. 检查依赖 (fcitx5, omarchy, omarchy-shell；预编译 addon 在 repo 里时无需编译工具链)
-2. 备份现有 fcitx5 配置
-3. 下载 LM (从 pinned GitHub Release, ~463MB, sha256 校验) 到 `~/.local/share/omarime/lib/`
-4. 安装预编译 addon (repo `dist/`，缺失时回退本地 cmake 编译)
-5. 安装主题 + 插件 + 配置后端
-6. 设置 `LIBIME_MODEL_DIRS` + `FCITX_ADDON_DIRS` (systemd drop-in)
-7. 应用主题 + 激活插件 + 重启 fcitx5/shell
+1. 检查依赖 (fcitx5 + pinyin addon, omarchy, omarchy-shell, jq/busctl/hyprctl；
+   预编译 addon 在 repo 里时无需编译工具链)
+2. 解析 LM：锁定的 release（sha256 fail-closed 校验）/ dist/ / --lm-file，
+   并依据 model-manifest.json 判定是否已安装且一致
+3. 安装预编译 addon（含 ldd -r ABI 预检；失败回退本地 cmake 编译）
+4. 安装主题 + 插件 + 配置后端（插件安装前备份既有目录）
+5. 事务提交：stop fcitx5 → 备份/编辑配置 + 写入 LM + manifest
+   → restart fcitx5（失败时自动恢复服务）
+6. 应用主题 + 激活插件 + 重启 shell，并通过**健康检查**：
+   服务 active → addon 已加载 → state 文件实时写入
 
 ### 离线安装
 
@@ -102,23 +106,45 @@ cloud-pinyin 预测（安装会给出 warning）。
 ./install.sh --undo
 ```
 
-恢复所有 fcitx5 配置、移除 omarime 文件、禁用插件、重启 fcitx5。
+恢复所有 fcitx5 配置、移除 omarime 文件、恢复安装前已有的
+插件目录及其启用状态、重启 fcitx5。
 
 ## 语言模型更新
 
-LM 不随代码更新。更新流程：
+LM 由 `~/.local/share/omarime/lib/model-manifest.json` 跟踪：
+
+```json
+{
+  "release": "v0.1.1",
+  "source": "release",
+  "files": {
+    "zh_CN.lm": {"sha256": "…", "bytes": 463166204},
+    "zh_CN.lm.predict": {"sha256": "…", "bytes": 3901025}
+  }
+}
+```
+
+更新流程：
 
 1. 训练新模型 (kenlm → ARPA → `libime_slm_build_binary`)
 2. 生成预测索引 (`libime_prediction`)
-3. 上传到 GitHub Release (替换 asset)
-4. 用户重新运行 `install.sh` (会检测已有 LM 并跳过，除非删除旧文件)
+3. 上传到新 release（替换 asset）
+4. 用户重新运行 `install.sh` → 新 `VERSION` 与 manifest 不一致，
+   自动下载并原子替换旧的 LM
+
+已有 LM 只在 manifest.release == 当前 VERSION 且 sha256 全部匹配时
+才跳过；升级 VERSION 后必然触发更新。旧安装（无 manifest）会先比对
+已有文件与 release digest，一致则只补写 manifest（无需重下 463MB）。
 
 ## CI / 发布
 
 ### 日常 CI (push to main)
 
-- 校验 `dist/libomarime-state.so`：x86-64 ELF + **与源码同步**（源码 hash sidecar）
-- `bash -n` + `shellcheck` + install.sh 可执行 smoke test
+- 校验 `dist/libomarime-state.so`：x86-64 ELF、NEEDED 依赖集合
+  (libFcitx5Core.so.7 / Config.so.6 / Utils.so.2)、**与源码同步**
+  （聚合 hash sidecar：cpp + CMakeLists + conf.in）
+- `bash -n` + `shellcheck`（install.sh / omarime-config / omarime-theme / hook）
+- install.sh 可执行 smoke test（--help、非法参数拒绝、函数先定义回归）
 
 ### 发版流程 (tag 触发)
 
@@ -127,9 +153,13 @@ LM 不随代码更新。更新流程：
 cmake -S engine/omarime-state -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 cp build/libomarime-state.so dist/
-sha256sum engine/omarime-state/omarime-state.cpp | cut -d' ' -f1 > dist/libomarime-state.so.src
+sha256sum engine/omarime-state/omarime-state.cpp \
+          engine/omarime-state/CMakeLists.txt \
+          engine/omarime-state/omarime-state.conf.in \
+  | sha256sum | cut -d' ' -f1 > dist/libomarime-state.so.src
 
-# 2. 升级 VERSION 文件 (决定 install.sh 拉取哪个 release 的 LM/addon)
+# 2. 升级 VERSION 文件 (决定 install.sh 拉取哪个 release 的 LM/addon，
+#    也驱动用户的模型更新)
 echo "0.1.1" > VERSION
 
 # 3. 提交 + 打 tag (CI 验证通过后自动创建 DRAFT release, 附 .so)
@@ -147,18 +177,22 @@ gh api repos/forbidden-game/omarime/releases/$NUM_ID -X PATCH -f draft=false
 ```
 
 用户侧更新：`git pull && ./install.sh`——install.sh 按 `VERSION` 拉取对应
-release 的 LM，并做 sha256 校验。已安装的 LM 会跳过（除非删除旧文件或
-升级 VERSION 后删除 `~/.local/share/omarime/lib/zh_CN.lm*`）。
+release 的 LM，sha256 **fail-closed** 校验（拿不到 digest 即失败，不降级
+为跳过），然后写入 manifest。已安装且 manifest 一致的 LM 会跳过。
 
 ## 依赖声明
 
-| 依赖 | 最低版本 | 来源 | 用途 |
-|---|---|---|---|
-| fcitx5 | 5.1 | Omarchy 系统包 | IM 协议 + pinyin addon |
-| libime | 1.1 | 随 fcitx5-chinese-addons | 解码引擎 + LM 加载 |
-| omarchy | 4.x | Omarchy 系统 | CLI + plugin API |
-| omarchy-shell | 4.x | Omarchy 系统 | Quickshell UI 宿主 |
-| systemd --user | — | 系统 | fcitx5 service + drop-in |
+### 运行时 (installer 强制检查)
+
+| 依赖 | 检查方式 | 用途 |
+|---|---|---|
+| fcitx5 | `command -v fcitx5` | IM 框架 |
+| fcitx5-chinese-addons | `/usr/share/fcitx5/addon/pinyin.conf` | pinyin 引擎 (LM 真正生效的前提) |
+| fcitx5-remote | `command -v` | 指示器/开关 |
+| omarchy / omarchy-shell | `command -v` | 插件与 CLI |
+| jq / busctl | `command -v` | 设置面板后端 |
+| hyprctl / fc-match | `command -v` | 主题生成器 |
+| systemd --user | — | fcitx5 service + drop-in |
 
 构建时 (仅 fallback 本地编译):
 | 依赖 | 用途 |

@@ -1,4 +1,6 @@
 .firecrawl/
+__pycache__/
+*.pyc
 *.bak
 research/apk/
 research/unpacked/

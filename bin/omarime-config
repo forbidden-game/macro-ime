@@ -30,6 +30,46 @@ OMARIME_HOME="${HOME}/.local/share/omarime"
 
 die() { echo "omarime-config: $*" >&2; exit 1; }
 
+# --- service transaction ------------------------------------------------------
+# If we have to stop fcitx5 to edit its files, we owe it a restart: whatever
+# happens later (failure, user interrupt), an EXIT trap brings it back.
+FCITX_NEED_RESTART=0
+teardown() {
+  if (( FCITX_NEED_RESTART )); then
+    systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+    systemctl --user start omarchy-fcitx5.service 2>/dev/null || true
+  fi
+}
+trap teardown EXIT
+
+stop_fcitx() {
+  if systemctl --user is-active --quiet omarchy-fcitx5.service 2>/dev/null || \
+     pgrep -x fcitx5 >/dev/null 2>&1; then
+    systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
+    # Clean up legacy/D-Bus-autostarted instances outside the unit cgroup.
+    pkill -x fcitx5 2>/dev/null || true
+    FCITX_NEED_RESTART=1
+  fi
+  # The 463MB LM is memory-mapped; give the process time to unmap + exit.
+  for _ in {1..150}; do pgrep -x fcitx5 >/dev/null || return 0; sleep 0.1; done
+  die "fcitx5 did not stop within 15s"
+}
+
+restart_fcitx() {
+  if (( FCITX_NEED_RESTART )); then
+    systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
+    systemctl --user start omarchy-fcitx5.service
+    FCITX_NEED_RESTART=0
+  fi
+}
+
+restart_with_edit() { # restart_with_edit <file> <key> <value>
+  local file=$1 key=$2 value=$3
+  stop_fcitx
+  ini_set "$file" "$key" "$value"
+  restart_fcitx
+}
+
 ini_get() { # ini_get <file> <key> <default>
   local v
   v=$(sed -n "s/^$2[[:space:]]*=[[:space:]]*//p" "$1" 2>/dev/null | tail -1)
@@ -46,22 +86,6 @@ ini_set() { # ini_set <file> <key> <value>
   else
     printf '%s=%s\n' "$key" "$value" >>"$file"
   fi
-}
-
-stop_fcitx() {
-  systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
-  # Clean up legacy/D-Bus-autostarted instances outside the unit cgroup.
-  pkill -x fcitx5 2>/dev/null || true
-  for _ in {1..20}; do pgrep -x fcitx5 >/dev/null || return 0; sleep 0.05; done
-  die "fcitx5 did not stop"
-}
-
-restart_with_edit() { # restart_with_edit <file> <key> <value>
-  local file=$1 key=$2 value=$3
-  stop_fcitx
-  ini_set "$file" "$key" "$value"
-  systemctl --user reset-failed omarchy-fcitx5.service 2>/dev/null || true
-  systemctl --user start omarchy-fcitx5.service
 }
 
 set_addon_value() { # set_addon_value <addon> <file> <key> <value> [group]
@@ -191,7 +215,7 @@ case ${1:-} in
         stop_fcitx
         rm -f "${HOME}/.local/share/fcitx5/pinyin/user.dict" \
               "${HOME}/.local/share/fcitx5/pinyin/user.history"
-        systemctl --user start omarchy-fcitx5.service
+        restart_fcitx
         echo reset-ok ;;
       *) die "action: theme-regenerate | userdict-reset" ;;
     esac ;;

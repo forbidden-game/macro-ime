@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(omarime-state VERSION 0.1.0 LANGUAGES CXX)
+project(omarime-state VERSION 0.1.2 LANGUAGES CXX)
 
 find_package(Fcitx5Core 5.1 REQUIRED)
 
