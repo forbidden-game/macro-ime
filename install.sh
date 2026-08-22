@@ -274,28 +274,28 @@ install_language_model() {
       echo "  Place the LM file at dist/${LM_FILENAME} or use --lm-file <path>" >&2
       return 1
     fi
+    if ! command -v gh >/dev/null; then
+      echo "omarime: 'gh' CLI is required to download the language model" >&2
+      echo "  from the (private) GitHub release. Install it or use --lm-file." >&2
+      return 1
+    fi
+    local dl_dir
+    dl_dir=$(mktemp -d)
     note "downloading language model from GitHub Release (~463MB)…"
-    lm_src=$(mktemp)
-    predict_src=$(mktemp)
-    local dl_lm dl_predict
-    dl_lm=$(gh_release_asset_url "$LM_FILENAME") || {
-      echo "omarime: failed to find LM asset in GitHub Release" >&2
+    gh release download --repo "$GH_REPO" --pattern "$LM_FILENAME" \
+      --pattern "$LM_PREDICT_FILENAME" --dir "$dl_dir" 2>/dev/null || {
+      echo "omarime: LM download from GitHub Release failed." >&2
+      echo "  Use --lm-file <path> to provide it manually." >&2
+      rm -rf "$dl_dir"
       return 1
     }
-    dl_predict=$(gh_release_asset_url "$LM_PREDICT_FILENAME") || {
-      echo "omarime: failed to find predict asset in GitHub Release" >&2
+    lm_src="${dl_dir}/${LM_FILENAME}"
+    predict_src="${dl_dir}/${LM_PREDICT_FILENAME}"
+    if [[ ! -f "$lm_src" ]]; then
+      echo "omarime: LM file missing after download" >&2
+      rm -rf "$dl_dir"
       return 1
-    }
-    curl -fL --progress-bar -o "$lm_src" "$dl_lm" || {
-      echo "omarime: LM download failed" >&2
-      rm -f "$lm_src"
-      return 1
-    }
-    curl -fL --progress-bar -o "$predict_src" "$dl_predict" || {
-      echo "omarime: predict download failed" >&2
-      rm -f "$lm_src" "$predict_src"
-      return 1
-    }
+    fi
   fi
 
   # Install
@@ -305,17 +305,13 @@ install_language_model() {
     cp "$predict_src" "$predict_dest"
   fi
 
-  # Clean up temp files (but not if they're in dist/)
-  if [[ "$lm_src" != "${SRC}/dist/"* && "$lm_src" != "$LM_FILE" ]]; then
-    rm -f "$lm_src" "$predict_src"
-  fi
+  # Clean up temp files (but not if they're in dist/ or user-provided)
+  case "$lm_src" in
+    "${SRC}/dist/"*|"$LM_FILE") : ;;  # keep
+    *) rm -rf "$(dirname "$lm_src")" 2>/dev/null || rm -f "$lm_src" "$predict_src" ;;
+  esac
 
   ok "language model installed ($(du -h "$lm_dest" | cut -f1))"
-}
-
-gh_release_asset_url() {
-  local name=$1
-  curl -fsSL "$GH_API" | jq -r ".assets[] | select(.name == \"${name}\") | .browser_download_url"
 }
 
 install_addon() {
