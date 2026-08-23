@@ -1,9 +1,9 @@
-// omarime-eval — LM 对比评测工具 (Spike)
-// 用法: omarime-eval <sc.dict> <lm.bin> <eval.tsv>
+// macro-ime-eval — LM 对比评测工具
+// 用法: macro-ime-eval <sc.dict> <lm.bin> <eval.tsv>
 //   eval.tsv 每行: 拼音<TAB>期望句子
 // 输出: 每行结果 + 汇总 (句准确率 P@1 / 字准确率)
 //
-// 编译: g++ -O2 -std=c++17 -o omarime-eval omarime-eval.cpp \
+// 编译: g++ -O2 -std=c++17 -o macro-ime-eval macro-ime-eval.cpp \
 //        $(pkg-config --cflags --libs LibIME)   (装好 libime 后)
 #include <libime/pinyin/pinyinime.h>
 #include <libime/pinyin/pinyincontext.h>

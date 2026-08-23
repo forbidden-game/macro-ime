@@ -1,4 +1,4 @@
-# omarime — A product-grade Chinese IME for Omarchy
+# Macro IME — A product-grade Chinese IME for Omarchy
 
 > Omarchy + RIME→libime + IME. 目标：Gboard 级别的"越用越好用"，Omarchy 级别的颜值。
 
@@ -52,7 +52,7 @@ architecture — is why stock fcitx5-pinyin also disappoints on modern
 vocabulary and prediction, and why everyone flees to rime-ice's dictionaries
 (which don't fix the model problem either).
 
-**omarime = keep the proven decoder, train the missing modern brain, wrap it in
+**Macro IME = keep the proven decoder, train the missing modern brain, wrap it in
 a beautiful native UI.**
 
 ## 2. Module selection (best-of-breed assembly)
@@ -64,14 +64,14 @@ a beautiful native UI.**
 | Language model | **Ours**: trigram trained with **kenlm** on modern corpora → ARPA → `libime_slm_build_binary` | the single highest-leverage quality lever; nobody ships a fresh one | octagram grammar for rime (still inside rime's weak adaptation loop) |
 | Dictionaries | **Ours**: curated merge (zhwiki titles, THUOCL, open Sogou-cell conversions, Jun Da freq) → `libime_pinyindict` | dict quality = coverage; LM quality = ranking | rime-ice dicts (good data, wrong engine) |
 | User adaptation | libime **UserLanguageModel + HistoryBigram**, tuned & verified on | the "越用越好用" property, built-in | rime userdb (single-word boost only) |
-| Cloud pinyin | **removed** (settings toggle + `omarime-config cloud.enabled` dropped; upstream addon stays off) | privacy-first; no need for it | — |
+| Cloud pinyin | **removed** (settings toggle + `macro-ime-config cloud.enabled` dropped; upstream addon stays off) | privacy-first; no need for it | — |
 | Candidate UI | **kimpanel → Quickshell plugin** in omarchy-shell | native Omarchy look; nobody has built this for Hyprland (verified) | classicui themes (fallback only) |
 | Indicator/toggle | event addon + bar-widget + `Ctrl+Space` + per-program memory (`ShareInputState=PerProgram`) | immediate, native, user-selected hotkey | polling-only indicator |
 | Packaging | install.sh (idempotent, backup-first) + AUR where possible | out-of-box | — |
 
 **v2 research track (post-1.0):** neural rescoring — small transformer LM
 (6-layer class, int8, CPU-realtime) shallow-fused into the beam; either patch
-libime's scoring hook or fork decoder into `omarime-engine` (Rust).
+libime's scoring hook or fork decoder into `macro-ime-engine` (Rust).
 Paper-informed targets (see docs/research/gboard-research.md): Google IME
 scores P@1=70.9 on the PD benchmark; PinyinGPT (beam=16) reaches 73.15 with a
 pinyin-constrained vocabulary — the key trick for abbreviated-pinyin input.
@@ -87,10 +87,10 @@ Gboard black-box research program: docs/research/gboard-research.md.
         │ Controller1 DBus     │ org.kde.kimpanel.inputmethod
 ┌───────▼──────────────────────▼───────────────────────────────────────────┐
 │ fcitx5 (omarchy-fcitx5.service)                                          │
-│  └─ pinyin addon (fcitx5-chinese-addons / later: omarime addon)          │
+│  └─ pinyin addon (fcitx5-chinese-addons / later: macro-ime addon)       │
 │      ├─ libime decoder + PinyinCorrection + Prediction                   │
-│      ├─ omarime.lm  ← OUR modern trigram (kenlm → libime SLM binary)     │
-│      ├─ omarime.dict ← OUR merged dictionaries (libime_pinyindict)       │
+│      ├─ macro-ime.lm  ← OUR modern trigram (kenlm → libime SLM binary)   │
+│      ├─ macro-ime.dict ← OUR merged dictionaries (libime_pinyindict)     │
 │      └─ UserLanguageModel (~/.local/share/fcitx5/pinyin/)  越用越好用      │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -98,7 +98,7 @@ Gboard black-box research program: docs/research/gboard-research.md.
 Repo layout:
 
 ```
-omarime/
+macro-ime/
 ├── PLAN.md, README.md
 ├── docs/                     # research, architecture, eval methodology
 │   └── research/gboard-research.md  # Gboard black-box program + benchmarks
@@ -108,14 +108,14 @@ omarime/
 │   └── eval/                 # test sentences (pinyin → expected hanzi)
 ├── lm/
 │   ├── train.sh              # clean → segment → kenlm → ARPA → libime binary
-│   └── eval.sh               # CER/top-1 on eval set, old-LM vs omarime-LM
-├── engine/                   # fcitx5 config + omarime-state event addon
+│   └── eval.sh               # CER/top-1 on eval set, old-LM vs macro-ime-LM
+├── engine/                   # fcitx5 config + macro-ime-state event addon
 ├── hypr/                     # bindings snippet
-├── bin/omarime-config        # live fcitx5 settings backend
+├── bin/macro-ime-config      # live fcitx5 settings backend
 ├── plugins/
-│   ├── omarime.indicator/    # bar-widget 中/A + toggle (Phase 3)
-│   ├── omarime.settings/     # native settings menu (Phase 3)
-│   └── omarime.candidate/    # kimpanel Quickshell overlay (Phase 4)
+│   ├── macro-ime.indicator/  # bar-widget 中/A + toggle (Phase 3)
+│   ├── macro-ime.settings/   # native settings menu (Phase 3)
+│   └── macro-ime.candidate/  # kimpanel Quickshell overlay (Phase 4)
 ├── themes/                   # classicui theme generator + theme-set hook
 ├── research/apk/             # Gboard APK staging (gitignored, never commit)
 └── install.sh
@@ -167,16 +167,16 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 
 ### Phase 3 — Beauty + indicator (2–3 days)
 - [x] classicui theme generated from active Omarchy theme + `theme-set` hook
-      (themes/omarime-theme: palette from colors.toml, radius from hyprctl,
+      (themes/macro-ime-theme: palette from colors.toml, radius from hyprctl,
       font from fc-match; recipe = omarchy popup: bg fill + accent border;
       preedit in panel via PreeditEnabledByDefault=False; verified on
       retro-82 dark + catppuccin-latte light, horizontal + vertical)
-- [x] `omarime-state` C++ addon watches activate/deactivate/switch/focus events;
+- [x] `macro-ime-state` C++ addon watches activate/deactivate/switch/focus events;
       runtime state → Quickshell FileView updates the bar in one frame
-- [x] `omarime.indicator` bar widget (中/A, left-click toggle, right-click settings,
+- [x] `macro-ime.indicator` bar widget (中/A, left-click toggle, right-click settings,
       event-driven per-program refresh + 30s failure-only fallback)
 - [x] Keep switch feedback bar-only; removed redundant delayed OSD
-- [x] Native `omarime.settings` menu: active state, horizontal/vertical,
+- [x] Native `macro-ime.settings` menu: active state, horizontal/vertical,
       cloud pinyin, QWERTY correction, 13 fuzzy pairs, theme regeneration,
       user-dictionary reset; atomic `Controller1.SetConfig` writes
 
@@ -213,9 +213,9 @@ previous on the harness *and* in a blind feel-test. This is how we avoid
 
 1. ~~rime-ice vs wanxiang~~ → moot (engine pivoted to libime)
 2. 双拼 in Phase 1 or later? (config-only, cheap — default: include Xiaohe)
-3. ~~Cloud pinyin: keep OFF by default?~~ → resolved: feature removed from omarime
+3. ~~Cloud pinyin: keep OFF by default?~~ → resolved: feature removed from Macro IME
 4. Phase order OK? (1 → 2 → 3 → 4; Phase 2 is the long pole)
-5. License for omarime itself: MIT? (data files keep their own licenses)
+5. License for Macro IME itself: MIT? (data files keep their own licenses)
 
 ## 8. References
 

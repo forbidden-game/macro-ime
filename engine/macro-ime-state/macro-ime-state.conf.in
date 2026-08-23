@@ -1,8 +1,8 @@
 [Addon]
-Name=omarime state bridge
+Name=Macro IME state bridge
 Comment=Event-driven fcitx5 input state for the Omarchy bar
 Type=SharedLibrary
-Library=libomarime-state
+Library=libmacro-ime-state
 Category=Module
 Version=@PROJECT_VERSION@
 OnDemand=False

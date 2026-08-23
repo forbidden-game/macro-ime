@@ -6,10 +6,10 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// OmarIME Settings — Native Chinese Input Method Control Panel
+// Macro IME Settings — Native Chinese Input Method Control Panel
 //
 // Dual-engine Chinese IME for Omarchy desktop.
-// Triggered via: `omarchy-shell shell toggle omarime.settings '{}'`
+// Triggered via: `omarchy-shell shell toggle macro-ime.settings '{}'`
 
 Item {
   id: root
@@ -18,9 +18,9 @@ Item {
   property var manifest: null
   property bool opened: false
 
-  readonly property string configBin: Quickshell.env("HOME") + "/.local/share/omarime/bin/omarime-config"
+  readonly property string configBin: Quickshell.env("HOME") + "/.local/share/macro-ime/bin/macro-ime-config"
 
-  // ---- State model from omarime-config get-all --json
+  // ---- State model from macro-ime-config get-all --json
   property bool imActive: false
   property bool vertical: false
   property string correction: "None"
@@ -174,7 +174,7 @@ Item {
     visible: root.opened
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
-    WlrLayershell.namespace: "omarime-settings"
+    WlrLayershell.namespace: "macro-ime-settings"
     WlrLayershell.layer: WlrLayer.Top
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore

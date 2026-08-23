@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# devshot.sh — safely screenshot the omarime candidate window.
+# devshot.sh — safely screenshot the Macro IME candidate window.
 #
 # Launches its own foot window, waits until Hyprland confirms it is focused,
 # activates the IME *for that window*, types a test string, then captures a
@@ -9,8 +9,8 @@
 set -euo pipefail
 
 TEXT="${1:-nihao}"
-OUT="${2:-/tmp/omarime-devshot.png}"
-MARK="omarime-test-$$"
+OUT="${2:-/tmp/macro-ime-devshot.png}"
+MARK="macro-ime-test-$$"
 
 setsid foot -e bash -c "export PS1=$MARK; sleep 25" >/dev/null 2>&1 &
 

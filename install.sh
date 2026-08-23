@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# omarime installer — Omarchy-native Chinese IME experience.
+# Macro IME installer — Omarchy-native Chinese IME experience.
 #
 #   ./install.sh [options]          install everything and apply now
 #   ./install.sh --undo             full rollback
@@ -23,26 +23,26 @@
 #   (service active, addon loaded, state file written). If anything fails,
 #   on_error restarts fcitx5 so the machine is never left without an IME.
 #
-# Installed-model tracking: ~/.local/share/omarime/lib/model-manifest.json
+# Installed-model tracking: ~/.local/share/macro-ime/lib/model-manifest.json
 # records the release + sha256 of the installed LM. Reinstalls skip only when
 # the manifest matches the pinned release *and* the files verify; a VERSION
 # bump therefore really updates the model.
 set -Eeuo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OMARIME_HOME="${HOME}/.local/share/omarime"
-OMARIME_LIB="${OMARIME_HOME}/lib"
-OMARIME_LM_DIR="${OMARIME_LIB}"
+MACRO_IME_HOME="${HOME}/.local/share/macro-ime"
+MACRO_IME_LIB="${MACRO_IME_HOME}/lib"
+MACRO_IME_LM_DIR="${MACRO_IME_LIB}"
 PLUGIN_DIR="${HOME}/.config/omarchy/plugins"
 UI_CONF="${HOME}/.config/fcitx5/conf/classicui.conf"
 CORE_CONF="${HOME}/.config/fcitx5/config"
 PY_CONF="${HOME}/.config/fcitx5/conf/pinyin.conf"
-BACKUP_DIR="$OMARIME_HOME/backup"
-STATE_ADDON_CONF="${HOME}/.local/share/fcitx5/addon/omarime-state.conf"
-FCITX_DROPIN="${HOME}/.config/systemd/user/omarchy-fcitx5.service.d/omarime-state.conf"
-RUNTIME_STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/${UID}}/omarime"
-MANIFEST="${OMARIME_LM_DIR}/model-manifest.json"
-GH_REPO="forbidden-game/omarime"
+BACKUP_DIR="$MACRO_IME_HOME/backup"
+STATE_ADDON_CONF="${HOME}/.local/share/fcitx5/addon/macro-ime-state.conf"
+FCITX_DROPIN="${HOME}/.config/systemd/user/omarchy-fcitx5.service.d/macro-ime-state.conf"
+RUNTIME_STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/${UID}}/macro-ime"
+MANIFEST="${MACRO_IME_LM_DIR}/model-manifest.json"
+GH_REPO="forbidden-game/macro-ime"
 
 LM_FILENAME="zh_CN.lm"
 LM_PREDICT_FILENAME="zh_CN.lm.predict"
@@ -88,21 +88,21 @@ require_commands() {
   for c in omarchy omarchy-shell systemctl fcitx5 fcitx5-remote jq busctl hyprctl fc-match; do
     command -v "$c" >/dev/null || missing+=("$c")
   done
-  # fcitx5-chinese-addons ships the pinyin engine that omarime builds on.
+  # fcitx5-chinese-addons ships the pinyin engine that Macro IME builds on.
   # Without it the LM would never be used.
   [[ -f /usr/share/fcitx5/addon/pinyin.conf ]] || \
     missing+=("fcitx5-chinese-addons (pinyin addon) — install with: omarchy pkg add fcitx5-chinese-addons")
   # Build tools only when we actually have to compile the addon from source.
-  if [[ ! -f "${SRC}/dist/libomarime-state.so" ]]; then
+  if [[ ! -f "${SRC}/dist/libmacro-ime-state.so" ]]; then
     for c in pkg-config cmake c++; do
       command -v "$c" >/dev/null || \
-        missing+=("$c (to build the addon; or provide dist/libomarime-state.so)")
+        missing+=("$c (to build the addon; or provide dist/libmacro-ime-state.so)")
     done
     pkg-config --exists 'Fcitx5Core >= 5.1' 2>/dev/null || \
       missing+=("Fcitx5Core >= 5.1 (fcitx5 dev headers — to build the addon)")
   fi
   if (( ${#missing[@]} )); then
-    printf '%s✗ omarime: missing required dependencies:%s\n' "$C_R" "$C_0" >&2
+    printf '%s✗ macro-ime: missing required dependencies:%s\n' "$C_R" "$C_0" >&2
     for m in "${missing[@]}"; do printf '    - %s\n' "$m" >&2; done
     printf '  Install them, then re-run: %s\n' "$0" >&2
     exit 1
@@ -122,7 +122,7 @@ on_error() {
     exit "$code"
   fi
   ERROR_HANDLED=1
-  printf '\n%s✗ omarime: install failed (exit %s, near line %s).%s\n' \
+  printf '\n%s✗ macro-ime: install failed (exit %s, near line %s).%s\n' \
     "$C_R" "$code" "$line" "$C_0" >&2
   # Never leave the machine without an input method: if we stopped fcitx5
   # during the commit phase and it is not running, bring it back.
@@ -158,7 +158,7 @@ stop_fcitx() {
   fi
   # The 463MB LM is memory-mapped; give the process time to unmap + exit.
   for _ in {1..150}; do pgrep -x fcitx5 >/dev/null || return 0; sleep 0.1; done
-  echo "omarime: fcitx5 did not stop within 15s" >&2
+  echo "macro-ime: fcitx5 did not stop within 15s" >&2
   return 1
 }
 
@@ -216,26 +216,32 @@ undo() {
   restore_file fcitx-dropin.conf "$FCITX_DROPIN"
   ok "config restored"
   step 3 3 "Removing installed files + restoring pre-install plugin state"
+  omarchy plugin disable macro-ime.indicator >/dev/null 2>&1 || true
+  omarchy plugin disable macro-ime.settings >/dev/null 2>&1 || true
   omarchy plugin disable omarime.indicator >/dev/null 2>&1 || true
   omarchy plugin disable omarime.settings >/dev/null 2>&1 || true
-  restore_plugin_dir omarime.indicator
-  restore_plugin_dir omarime.settings
+  restore_plugin_dir macro-ime.indicator
+  restore_plugin_dir macro-ime.settings
   # Restore enable state recorded before install (placement is not recorded
   # by omarchy; we remount on the center, as install does).
   if [[ -f "$BACKUP_DIR/plugin-state.json" ]]; then
-    if [[ $(jq -r '.[] | select(.id == "omarime.indicator") | .enabled // false' \
+    if [[ $(jq -r '.[] | select(.id == "macro-ime.indicator") | .enabled // false' \
           "$BACKUP_DIR/plugin-state.json" 2>/dev/null) == true ]]; then
-      omarchy plugin enable omarime.indicator center >/dev/null 2>&1 || true
+      omarchy plugin enable macro-ime.indicator center >/dev/null 2>&1 || true
     fi
-    if [[ $(jq -r '.[] | select(.id == "omarime.settings") | .enabled // false' \
+    if [[ $(jq -r '.[] | select(.id == "macro-ime.settings") | .enabled // false' \
           "$BACKUP_DIR/plugin-state.json" 2>/dev/null) == true ]]; then
-      omarchy plugin enable omarime.settings >/dev/null 2>&1 || true
+      omarchy plugin enable macro-ime.settings >/dev/null 2>&1 || true
     fi
   fi
-  rm -rf "$OMARIME_HOME" \
+  rm -rf "$MACRO_IME_HOME" \
+         "$HOME/.local/share/omarime" \
+         "$HOME/.local/share/fcitx5/themes/macro-ime" \
          "$HOME/.local/share/fcitx5/themes/omarime" \
+         "$HOME/.config/omarchy/hooks/theme-set.d/macro-ime.sh" \
          "$HOME/.config/omarchy/hooks/theme-set.d/omarime.sh" \
-         "$RUNTIME_STATE_DIR"
+         "$RUNTIME_STATE_DIR" \
+         "${XDG_RUNTIME_DIR:-/run/user/${UID}}/omarime"
   systemctl --user daemon-reload
   restart_fcitx
   ok "removed; fcitx5 config restored to its pre-install state"
@@ -244,7 +250,7 @@ undo() {
 load_version() {
   VERSION="$(cat "${SRC}/VERSION" 2>/dev/null || true)"
   if [[ -z "$VERSION" ]]; then
-    echo "omarime: no VERSION file in ${SRC}; cannot pin engine assets." >&2
+    echo "macro-ime: no VERSION file in ${SRC}; cannot pin engine assets." >&2
     echo "  Create ${SRC}/VERSION with the release version (e.g. 0.1.0)." >&2
     exit 1
   fi
@@ -276,12 +282,12 @@ assert_sha256() {
   local file=$1 expected=$2 label=$3
   local actual
   if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
-    echo "omarime: no sha256 digest available for ${label} (release ${LM_RELEASE:-unknown} API?)" >&2
+    echo "macro-ime: no sha256 digest available for ${label} (release ${LM_RELEASE:-unknown} API?)" >&2
     return 1
   fi
   actual=$(sha256sum "$file" | cut -d' ' -f1)
   if [[ "$actual" != "$expected" ]]; then
-    echo "omarime: sha256 mismatch for ${label}" >&2
+    echo "macro-ime: sha256 mismatch for ${label}" >&2
     echo "  expected: $expected" >&2
     echo "  actual:   $actual" >&2
     return 1
@@ -294,7 +300,7 @@ check_lm_size() {
   local size
   size=$(stat -c%s "$file")
   if [[ "$label" == "$LM_FILENAME" && "$size" -lt 100000000 ]]; then
-    echo "omarime: ${label} is only ${size} bytes (expected ~463MB); looks truncated" >&2
+    echo "macro-ime: ${label} is only ${size} bytes (expected ~463MB); looks truncated" >&2
     return 1
   fi
 }
@@ -329,8 +335,8 @@ prepare_language_model() {
     note "LM assets resolved from release ${LM_RELEASE}"
   fi
 
-  local lm_dest="${OMARIME_LM_DIR}/${LM_FILENAME}"
-  local predict_dest="${OMARIME_LM_DIR}/${LM_PREDICT_FILENAME}"
+  local lm_dest="${MACRO_IME_LM_DIR}/${LM_FILENAME}"
+  local predict_dest="${MACRO_IME_LM_DIR}/${LM_PREDICT_FILENAME}"
 
   # --- 1. Already installed and verified against the current LM release?
   #        (--lm-file always bypasses this: an explicit file wins.)
@@ -380,7 +386,7 @@ prepare_language_model() {
   # --- 3. Resolve a source: --lm-file / dist / pinned release download.
   if [[ -n "$LM_FILE" ]]; then
     if [[ ! -f "$LM_FILE" ]]; then
-      echo "omarime: LM file not found: $LM_FILE" >&2
+      echo "macro-ime: LM file not found: $LM_FILE" >&2
       return 1
     fi
     LM_SRC="$LM_FILE"
@@ -389,7 +395,7 @@ prepare_language_model() {
       note "warning: no ${LM_PREDICT_FILENAME} next to $LM_FILE — prediction will be off"
       LM_PREDICT_SRC=""
     elif [[ $(stat -c%s "$LM_PREDICT_SRC") -lt 1000000 ]]; then
-      echo "omarime: ${LM_PREDICT_SRC} is only $(stat -c%s "$LM_PREDICT_SRC") bytes (expected ~3.9MB); looks truncated" >&2
+      echo "macro-ime: ${LM_PREDICT_SRC} is only $(stat -c%s "$LM_PREDICT_SRC") bytes (expected ~3.9MB); looks truncated" >&2
       return 1
     fi
     LM_SOURCE="lm-file"
@@ -401,7 +407,7 @@ prepare_language_model() {
     if [[ ! -f "$LM_PREDICT_SRC" ]]; then
       LM_PREDICT_SRC=""
     elif [[ $(stat -c%s "$LM_PREDICT_SRC") -lt 1000000 ]]; then
-      echo "omarime: ${LM_PREDICT_SRC} is only $(stat -c%s "$LM_PREDICT_SRC") bytes (expected ~3.9MB); looks truncated" >&2
+      echo "macro-ime: ${LM_PREDICT_SRC} is only $(stat -c%s "$LM_PREDICT_SRC") bytes (expected ~3.9MB); looks truncated" >&2
       return 1
     fi
     LM_SOURCE="dist"
@@ -410,23 +416,23 @@ prepare_language_model() {
   else
     if (( OFFLINE )); then
       if [[ -f "$lm_dest" ]]; then
-        echo "omarime: LM files exist locally but are not verified" >&2
+        echo "macro-ime: LM files exist locally but are not verified" >&2
         echo "  (missing/mismatched ${MANIFEST}, and --offline cannot resolve the release)." >&2
         echo "  Re-run online once to verify, or delete the old files to reinstall:" >&2
-        echo "    rm -f ${OMARIME_LM_DIR}/${LM_FILENAME} ${OMARIME_LM_DIR}/${LM_PREDICT_FILENAME}" >&2
+        echo "    rm -f ${MACRO_IME_LM_DIR}/${LM_FILENAME} ${MACRO_IME_LM_DIR}/${LM_PREDICT_FILENAME}" >&2
       else
-        echo "omarime: LM not found locally and --offline is set." >&2
+        echo "macro-ime: LM not found locally and --offline is set." >&2
         echo "  Place it at dist/${LM_FILENAME} or use --lm-file <path>" >&2
       fi
       return 1
     fi
     if ! command -v gh >/dev/null; then
-      echo "omarime: 'gh' CLI is required to download the language model from the" >&2
+      echo "macro-ime: 'gh' CLI is required to download the language model from the" >&2
       echo "  private release. Run 'gh auth login' first, or use --lm-file <path>." >&2
       return 1
     fi
     if [[ -z "$LM_RELEASE" ]]; then
-      echo "omarime: cannot resolve a release that carries ${LM_FILENAME}." >&2
+      echo "macro-ime: cannot resolve a release that carries ${LM_FILENAME}." >&2
       echo "  Upload the model to a release, or use --lm-file <path>." >&2
       return 1
     fi
@@ -435,14 +441,14 @@ prepare_language_model() {
     gh release download "$LM_RELEASE" --repo "$GH_REPO" \
       --pattern "$LM_FILENAME" --pattern "$LM_PREDICT_FILENAME" --dir "$LM_DL_DIR" \
       2>/dev/null || {
-      echo "omarime: download from ${LM_RELEASE} failed." >&2
+      echo "macro-ime: download from ${LM_RELEASE} failed." >&2
       echo "  Check the release exists + your gh auth, or use --lm-file." >&2
       rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1
     }
     LM_SRC="${LM_DL_DIR}/${LM_FILENAME}"
     LM_PREDICT_SRC="${LM_DL_DIR}/${LM_PREDICT_FILENAME}"
     if [[ ! -f "$LM_SRC" ]]; then
-      echo "omarime: LM file missing after download" >&2
+      echo "macro-ime: LM file missing after download" >&2
       rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1
     fi
     LM_SOURCE="release"
@@ -466,8 +472,8 @@ prepare_language_model() {
 
 # Commit-phase: copy the staged LM into place and write the manifest.
 commit_language_model() {
-  local lm_dest="${OMARIME_LM_DIR}/${LM_FILENAME}"
-  local predict_dest="${OMARIME_LM_DIR}/${LM_PREDICT_FILENAME}"
+  local lm_dest="${MACRO_IME_LM_DIR}/${LM_FILENAME}"
+  local predict_dest="${MACRO_IME_LM_DIR}/${LM_PREDICT_FILENAME}"
 
   if (( commit_manifest_only )); then
     write_manifest "$lm_dest" "$predict_dest"
@@ -475,7 +481,7 @@ commit_language_model() {
   fi
   [[ -z "$LM_SRC" ]] && return 0
 
-  mkdir -p "$OMARIME_LM_DIR"
+  mkdir -p "$MACRO_IME_LM_DIR"
   cp "$LM_SRC" "$lm_dest"
   if [[ -n "$LM_PREDICT_SRC" ]]; then
     cp "$LM_PREDICT_SRC" "$predict_dest"
@@ -506,7 +512,7 @@ write_manifest() {
 
 # --- addon -------------------------------------------------------------------
 install_addon() {
-  local addon_dest="${OMARIME_LIB}/fcitx5/libomarime-state.so"
+  local addon_dest="${MACRO_IME_LIB}/fcitx5/libmacro-ime-state.so"
   mkdir -p "$(dirname "$addon_dest")" "$(dirname "$STATE_ADDON_CONF")" \
            "$(dirname "$FCITX_DROPIN")"
 
@@ -515,7 +521,7 @@ install_addon() {
 
   # ABI preflight: the pre-built .so must resolve against this machine's
   # fcitx5. On failure fall back to compiling from source.
-  local so="${SRC}/dist/libomarime-state.so"
+  local so="${SRC}/dist/libmacro-ime-state.so"
   if [[ -f "$so" ]]; then
     local bad
     bad=$(ldd -r "$so" 2>&1 | grep -E "not found|undefined symbol" || true)
@@ -527,7 +533,7 @@ install_addon() {
         build_state_addon_to "$addon_dest"
         ok "event addon built from source"
       else
-        echo "omarime: pre-built addon ABI mismatch and no build toolchain." >&2
+        echo "macro-ime: pre-built addon ABI mismatch and no build toolchain." >&2
         echo "  Install cmake + Fcitx5Core headers, or use an Omarchy release" >&2
         echo "  that matches this fcitx5." >&2
         return 1
@@ -538,8 +544,8 @@ install_addon() {
     fi
   else
     if ! command -v cmake >/dev/null; then
-      echo "omarime: no pre-built addon in dist/ and cmake not available." >&2
-      echo "  Build it: cmake -S engine/omarime-state -B build && cmake --build build" >&2
+      echo "macro-ime: no pre-built addon in dist/ and cmake not available." >&2
+      echo "  Build it: cmake -S engine/macro-ime-state -B build && cmake --build build" >&2
       return 1
     fi
     build_state_addon_to "$addon_dest"
@@ -549,10 +555,10 @@ install_addon() {
   # does NOT prepend "lib", so Library= must be the exact .so name minus ".so".
   cat >"$STATE_ADDON_CONF" <<EOF
 [Addon]
-Name=omarime-state
-Comment=omarime event bridge (writes IM state to runtime dir)
+Name=macro-ime-state
+Comment=Macro IME event bridge (writes IM state to runtime dir)
 Type=SharedLibrary
-Library=libomarime-state
+Library=libmacro-ime-state
 Category=Module
 Version=${VERSION}
 OnDemand=False
@@ -563,8 +569,8 @@ EOF
   # default system addon dir, so we re-add it explicitly.
   cat >"$FCITX_DROPIN" <<EOF
 [Service]
-Environment="FCITX_ADDON_DIRS=%h/.local/share/omarime/lib/fcitx5:/usr/lib/fcitx5"
-Environment="LIBIME_MODEL_DIRS=%h/.local/share/omarime/lib"
+Environment="FCITX_ADDON_DIRS=%h/.local/share/macro-ime/lib/fcitx5:/usr/lib/fcitx5"
+Environment="LIBIME_MODEL_DIRS=%h/.local/share/macro-ime/lib"
 EOF
   ok "event addon installed"
 }
@@ -574,33 +580,33 @@ build_state_addon_to() {
   local build_dir
   build_dir=$(mktemp -d)
   note "configuring (cmake)"
-  cmake -S "$SRC/engine/omarime-state" -B "$build_dir" \
+  cmake -S "$SRC/engine/macro-ime-state" -B "$build_dir" \
     -DCMAKE_BUILD_TYPE=Release >/dev/null || {
-      echo "omarime: cmake configure failed" >&2; rm -rf "$build_dir"; return 1; }
-  note "compiling libomarime-state.so"
+      echo "macro-ime: cmake configure failed" >&2; rm -rf "$build_dir"; return 1; }
+  note "compiling libmacro-ime-state.so"
   cmake --build "$build_dir" --parallel >/dev/null || {
-      echo "omarime: build failed (fcitx5 ABI mismatch?)" >&2; rm -rf "$build_dir"; return 1; }
-  install -m 0755 "$build_dir/libomarime-state.so" "$dest"
+      echo "macro-ime: build failed (fcitx5 ABI mismatch?)" >&2; rm -rf "$build_dir"; return 1; }
+  install -m 0755 "$build_dir/libmacro-ime-state.so" "$dest"
   rm -rf "$build_dir"
 }
 
 # --- runtime + plugins -------------------------------------------------------
 install_runtime() {
-  mkdir -p "$OMARIME_HOME/bin" "$OMARIME_HOME/themes"
-  install -m 0755 "$SRC/bin/omarime-config" "$OMARIME_HOME/bin/"
-  install -m 0755 "$SRC/themes/omarime-theme" "$OMARIME_HOME/themes/"
-  cp -r "$SRC/themes/template" "$OMARIME_HOME/themes/"
+  mkdir -p "$MACRO_IME_HOME/bin" "$MACRO_IME_HOME/themes"
+  install -m 0755 "$SRC/bin/macro-ime-config" "$MACRO_IME_HOME/bin/"
+  install -m 0755 "$SRC/themes/macro-ime-theme" "$MACRO_IME_HOME/themes/"
+  cp -r "$SRC/themes/template" "$MACRO_IME_HOME/themes/"
 
   mkdir -p "${HOME}/.config/omarchy/hooks/theme-set.d"
   install -m 0755 "$SRC/themes/hook-theme-set.sh" \
-    "${HOME}/.config/omarchy/hooks/theme-set.d/omarime.sh"
+    "${HOME}/.config/omarchy/hooks/theme-set.d/macro-ime.sh"
   ok "runtime files in place"
 }
 
 install_plugins() {
   mkdir -p "$PLUGIN_DIR"
   local p staging
-  for p in omarime.indicator omarime.settings; do
+  for p in macro-ime.indicator macro-ime.settings; do
     # Preserve any pre-existing plugin dir so --undo can restore it fully
     # (e.g. a user-customized clone from an earlier install).
     if [[ -d "$PLUGIN_DIR/$p" && ! -e "$BACKUP_DIR/plugin-$p" ]]; then
@@ -674,17 +680,17 @@ health_check() {
   local journal
   sleep 1
   if ! systemctl --user is-active --quiet omarchy-fcitx5.service; then
-    echo "omarime: fcitx5 is not active after install (health check 1/3)" >&2
+    echo "macro-ime: fcitx5 is not active after install (health check 1/3)" >&2
     return 1
   fi
   journal=$(journalctl --user -u omarchy-fcitx5.service --since "2 min ago" 2>/dev/null || true)
-  if ! grep -q "Loaded addon omarime-state" <<<"$journal"; then
-    echo "omarime: state addon did not load (health check 2/3)" >&2
+  if ! grep -q "Loaded addon macro-ime-state" <<<"$journal"; then
+    echo "macro-ime: state addon did not load (health check 2/3)" >&2
     echo "  journal: journalctl --user -u omarchy-fcitx5.service -n 80" >&2
     return 1
   fi
   if [[ ! -s "$RUNTIME_STATE_DIR/state" ]]; then
-    echo "omarime: state file not written (health check 3/3)" >&2
+    echo "macro-ime: state file not written (health check 3/3)" >&2
     echo "  expected: $RUNTIME_STATE_DIR/state" >&2
     return 1
   fi
@@ -694,19 +700,19 @@ health_check() {
 apply_and_activate() {
   health_check || return 1
 
-  "$OMARIME_HOME/themes/omarime-theme"
+  "$MACRO_IME_HOME/themes/macro-ime-theme"
   ok "theme applied"
   omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
   sleep 1
-  omarchy plugin enable omarime.settings >/dev/null 2>&1 || \
-    echo "omarime: enable settings manually: omarchy plugin enable omarime.settings"
-  omarchy plugin enable omarime.indicator center >/dev/null 2>&1 || \
-    echo "omarime: add indicator manually: omarchy plugin enable omarime.indicator center"
+  omarchy plugin enable macro-ime.settings >/dev/null 2>&1 || \
+    echo "macro-ime: enable settings manually: omarchy plugin enable macro-ime.settings"
+  omarchy plugin enable macro-ime.indicator center >/dev/null 2>&1 || \
+    echo "macro-ime: add indicator manually: omarchy plugin enable macro-ime.indicator center"
   sleep 2
   omarchy restart shell >/dev/null 2>&1 || true
   # The theme script may have cycled fcitx5 again; confirm it is alive.
   if ! systemctl --user is-active --quiet omarchy-fcitx5.service; then
-    echo "omarime: fcitx5 is not active after theme application" >&2
+    echo "macro-ime: fcitx5 is not active after theme application" >&2
     return 1
   fi
 }
@@ -720,15 +726,14 @@ require_commands
 mkdir -p "$BACKUP_DIR"
 
 load_version
-
 trap 'on_error $LINENO' ERR
 
-echo "omarime: installing Omarchy-native Chinese IME experience (release ${RELEASE_TAG})"
+echo "macro-ime: installing Omarchy-native Chinese IME experience (release ${RELEASE_TAG})"
 
 TOTAL=6
 step 1 $TOTAL "Preparing language model"
 prepare_language_model
-step 2 $TOTAL "Installing event addon (libomarime-state.so)"
+step 2 $TOTAL "Installing event addon (libmacro-ime-state.so)"
 install_addon
 step 3 $TOTAL "Installing runtime files (backend + theme generator)"
 install_runtime
@@ -746,8 +751,8 @@ LM_MANIFEST_REL=$(jq -r '.release // ""' "$MANIFEST" 2>/dev/null || true)
 [[ -n "$LM_DL_DIR" ]] && rm -rf "$LM_DL_DIR"
 
 echo
-echo "omarime installed (release ${RELEASE_TAG}):"
-echo "  language model   ${OMARIME_LM_DIR}/${LM_FILENAME} (via LIBIME_MODEL_DIRS)"
+echo "Macro IME installed (release ${RELEASE_TAG}):"
+echo "  language model   ${MACRO_IME_LM_DIR}/${LM_FILENAME} (via LIBIME_MODEL_DIRS)"
 echo "                   tracked in ${MANIFEST} (LM release ${LM_MANIFEST_REL:-none})"
 echo "  candidate window follows the active omarchy theme"
 echo "  bar indicator    event-driven 中/EN · left-click toggle · right-click settings"

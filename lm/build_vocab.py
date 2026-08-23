@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""omarime 词表构建 v0 (Spike)
+"""Macro IME 词表构建 v0 (Spike)
 
 从 jieba 词表提取纯汉字词作为分词词库。
 过滤规则: 全汉字、长度1-6、词频>=2。

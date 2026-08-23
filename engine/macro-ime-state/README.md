@@ -1,4 +1,4 @@
-# omarime-state
+# macro-ime-state
 
 Small fcitx5 module that turns input-context events into an event-driven state
 file for the Omarchy bar.
@@ -8,7 +8,7 @@ It watches `InputContextInputMethodActivated`,
 `InputContextFocusIn` at the public `Default` phase, then writes:
 
 ```text
-$XDG_RUNTIME_DIR/omarime/state   # 0=unavailable, 1=English, 2=Pinyin
+$XDG_RUNTIME_DIR/macro-ime/state   # 0=unavailable, 1=English, 2=Pinyin
 ```
 
 The full installer builds the module against the installed fcitx5 ABI and adds

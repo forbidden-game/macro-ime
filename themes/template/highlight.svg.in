@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-  <!-- omarime highlight pill: accent fill at selected-fill alpha, no stroke (matches shell selected state)
+  <!-- macro-ime highlight pill: accent fill at selected-fill alpha, no stroke (matches shell selected state)
        NOTE: alpha via fill-opacity — 8-digit hex fills are unreliable through gdk-pixbuf SVG loaders -->
   <rect x="0" y="0" width="28" height="28" rx="@PILL_RADIUS@" ry="@PILL_RADIUS@" fill="@PILL_FILL@" fill-opacity="@PILL_OPACITY@"/>
 </svg>

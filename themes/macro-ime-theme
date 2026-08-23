@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# omarime-theme — generate an fcitx5 classicui theme from an Omarchy palette.
+# macro-ime-theme — generate an fcitx5 classicui theme from an Omarchy palette.
 #
 # Reads the live sources of desktop truth and bakes them into a self-contained
-# theme at ~/.local/share/fcitx5/themes/omarime/:
+# theme at ~/.local/share/fcitx5/themes/macro-ime/:
 #
 #   palette  ~/.local/state/omarchy/current/theme/colors.toml
 #   radius   hyprctl getoption decoration:rounding   (sharp desktops stay sharp)
@@ -13,13 +13,13 @@
 #   selection = accent fill @ selected-fill alpha · labels/comments dimmed
 #
 # Usage:
-#   omarime-theme                     regenerate from current theme + apply
-#   omarime-theme --theme gruvbox     generate from a named Omarchy theme
-#   omarime-theme --dry-run           print what would be generated
+#   macro-ime-theme                     regenerate from current theme + apply
+#   macro-ime-theme --theme gruvbox     generate from a named Omarchy theme
+#   macro-ime-theme --dry-run           print what would be generated
 #
 # Flags:
 #   --theme NAME        source Omarchy theme (default: current)
-#   --out DIR           output theme dir (default ~/.local/share/fcitx5/themes/omarime)
+#   --out DIR           output theme dir (default ~/.local/share/fcitx5/themes/macro-ime)
 #   --radius N          override corner radius (default: hyprctl decoration:rounding)
 #   --font FAMILY       override font family (default: fc-match monospace)
 #   --size PT           font size in points (default: 13)
@@ -41,13 +41,13 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_DIR="$SELF_DIR/template"
 
-OUT="${HOME}/.local/share/fcitx5/themes/omarime"
+OUT="${HOME}/.local/share/fcitx5/themes/macro-ime"
 THEME_ARG="" RADIUS="" FONT_FAMILY="" FONT_SIZE=13 BORDER_WIDTH=2
 PILL_ALPHA=30 LABEL_ALPHA=55 DIM_ALPHA=50 SEP_ALPHA=25 SELECTED="bright"
 SIZE_FACTOR=85 VERTICAL="" NO_UI_CONF="" RELOAD="auto" QUIET="" DRY_RUN=""
 
-die() { echo "omarime-theme: $*" >&2; exit 1; }
-msg() { [[ -n $QUIET ]] || echo "omarime-theme: $*" >&2; }
+die() { echo "macro-ime-theme: $*" >&2; exit 1; }
+msg() { [[ -n $QUIET ]] || echo "macro-ime-theme: $*" >&2; }
 
 # If we stop fcitx5 to edit its config, we owe it a restart — even if a
 # later command fails or the script is interrupted.
@@ -190,7 +190,7 @@ render "$TEMPLATE_DIR/radio.svg.in" "$OUT/radio.svg" "${SVG_COMMON[@]}"
 render "$TEMPLATE_DIR/arrow.svg.in" "$OUT/arrow.svg" "${SVG_COMMON[@]}"
 
 cat >"$OUT/generated.conf" <<EOF
-# provenance — consumed by omarime-theme on regeneration audits
+# provenance — consumed by macro-ime-theme on regeneration audits
 active_theme=$ACTIVE_NAME
 mode=$MODE
 radius=$RADIUS
@@ -213,8 +213,8 @@ TRAY_FONT_DESC="$FONT_FAMILY Bold $FONT_SIZE"
 conf_wants() { # does the conf file already carry every value we want?
   local want_v; [[ -n $VERTICAL ]] && want_v=True || want_v=False
   [[ -f $UI_CONF ]] || return 1
-  grep -q "^Theme=omarime$" "$UI_CONF" || return 1
-  grep -q "^DarkTheme=omarime$" "$UI_CONF" || return 1
+  grep -q "^Theme=macro-ime$" "$UI_CONF" || return 1
+  grep -q "^DarkTheme=macro-ime$" "$UI_CONF" || return 1
   grep -q "^UseDarkTheme=False$" "$UI_CONF" || return 1
   grep -q "^Font=$(make_font_desc "")$" "$UI_CONF" || return 1
   grep -q "^TrayOutlineColor=$BACKGROUND$" "$UI_CONF" || return 1
@@ -227,8 +227,8 @@ svc_active() { systemctl --user is-active --quiet omarchy-fcitx5.service || pgre
 apply_ui_conf() {
   local tmp keys key val
   keys=(
-    "Theme=omarime"
-    "DarkTheme=omarime"
+    "Theme=macro-ime"
+    "DarkTheme=macro-ime"
     "UseDarkTheme=False"
     "Font=$(make_font_desc "")"
     "MenuFont=$(make_font_desc "")"
@@ -260,7 +260,7 @@ elif [[ -n $DRY_RUN ]]; then
 else
   # ⚠ fcitx5 writes its in-memory config back on exit: stop → edit → start.
   if svc_active && [[ $RELOAD != none ]]; then
-    msg "switching Theme '$current_theme' → omarime (service restart to avoid config write-back)"
+    msg "switching Theme '$current_theme' → macro-ime (service restart to avoid config write-back)"
     systemctl --user stop omarchy-fcitx5.service 2>/dev/null || true
     FCITX_NEED_RESTART=1
     apply_ui_conf
@@ -288,7 +288,7 @@ if svc_active; then
     auto|*)
       # classicui caches assets by theme name: a config reload does NOT re-read
       # regenerated SVG/theme.conf. A service restart is ~200ms and fully safe.
-      if grep -q "^Theme=omarime$" "$UI_CONF" 2>/dev/null; then
+      if grep -q "^Theme=macro-ime$" "$UI_CONF" 2>/dev/null; then
         systemctl --user restart omarchy-fcitx5.service
         msg "restarted fcitx5 to load fresh theme assets"
       else

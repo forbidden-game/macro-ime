@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# omarime LM 训练管线 v0 (Spike) — zhwiki 单源
+# Macro IME LM 训练管线 v0 (Spike) — zhwiki 单源
 # 用法: ./pipeline.sh [12]   参数=并行核数
 set -euo pipefail
 
-WORK=${WORK:-$HOME/work/omarime-data}
+WORK=${WORK:-$HOME/work/macro-ime-data}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-PY=$HOME/work/omarime-venv/bin/python3
+PY=$HOME/work/macro-ime-venv/bin/python3
 N=${1:-12}
 KENLM_BIN=${KENLM_BIN:-$WORK/kenlm/build/bin}
 
@@ -42,7 +42,7 @@ echo "== [5/6] kenlm 训练 trigram =="
 ls -lh "$WORK/spike.arpa"
 
 echo "== [6/6] 转换为 libime 格式 (官方同款参数) =="
-"$KENLM_BIN/build_binary" -s -a 22 -q 4 trie "$WORK/spike.arpa" "$WORK/omarime.lm.bin"
-ls -lh "$WORK/omarime.lm.bin"
+"$KENLM_BIN/build_binary" -s -a 22 -q 4 trie "$WORK/spike.arpa" "$WORK/macro-ime.lm.bin"
+ls -lh "$WORK/macro-ime.lm.bin"
 
-echo "DONE: $WORK/omarime.lm.bin"
+echo "DONE: $WORK/macro-ime.lm.bin"

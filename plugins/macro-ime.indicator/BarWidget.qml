@@ -11,18 +11,18 @@ import qs.Commons
 // tokens: 中 in accent while composing, A dimmed while in English mode.
 // Click toggles, exactly like Ctrl+Space; the bar itself is the feedback.
 //
-// The omarime-state fcitx5 addon watches activation/deactivation/switch/focus
-// events inside fcitx5 and writes $XDG_RUNTIME_DIR/omarime/state. FileView
+// The macro-ime-state fcitx5 addon watches activation/deactivation/switch/focus
+// events inside fcitx5 and writes $XDG_RUNTIME_DIR/macro-ime/state. FileView
 // turns that into an immediate bar update without polling processes. A
 // low-frequency check only recovers from addon/service failures.
 
 BarWidget {
   id: root
-  moduleName: "omarime.indicator"
+  moduleName: "macro-ime.indicator"
 
   // per-widget shell.json override: {"fallbackPollMs": 30000}
   readonly property int fallbackPollMs: root.setting("fallbackPollMs", 30000)
-  readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR") + "/omarime/state"
+  readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR") + "/macro-ime/state"
 
   // fcitx5-remote state: 0 not running, 1 inactive, 2 active
   property int imState: 0
@@ -118,7 +118,7 @@ BarWidget {
     onPressed: function(button) {
       if (button === 2) {
         // right-click → settings panel
-        if (root.bar) root.bar.run("omarchy-shell shell toggle omarime.settings '{}'")
+        if (root.bar) root.bar.run("omarchy-shell shell toggle macro-ime.settings '{}'")
         return
       }
       if (root.bar) root.bar.run("fcitx5-remote -t")

@@ -1,10 +1,10 @@
 # 上下文机制 — 为什么同一串拼音，在不同上下文里候选不同
 
-> 本文拆解 omarime（fcitx5-pinyin + libime + E6 三阶 LM + 用户历史）里
+> 本文拆解 Macro IME（fcitx5-pinyin + libime + E6 三阶 LM + 用户历史）里
 > "上下文如何影响候选排序" 的完整机制：打分管线、三个相互独立的上下文入口、
-> 各自的代码路径与开关，以及 omarime 为什么默认「句间关、句内开、用户历史最强」。
+> 各自的代码路径与开关，以及 Macro IME 为什么默认「句间关、句内开、用户历史最强」。
 >
-> 行号基于 `libime v1.1.15` 与 `fcitx5-chinese-addons v5.1.13`（+ omarime 的
+> 行号基于 `libime v1.1.15` 与 `fcitx5-chinese-addons v5.1.13`（+ Macro IME 的
 > `UserModelWeight` patch）。源码快照在 `/tmp/libime-src`、`/tmp/fcitx5-ca-src`。
 
 ---
@@ -20,7 +20,7 @@
 其中「语言模型转移分」是唯一被上下文影响的部分。上下文有**三个独立入口**，
 互不重叠、各自可单独关掉：
 
-| 入口 | 含义 | 开关 | omarime 默认 |
+| 入口 | 含义 | 开关 | Macro IME 默认 |
 |---|---|---|---|
 | **A. 句间上下文** | 上一句上屏的词，引导本句候选 | `KeepCurrentContext` | **关** |
 | **B. 句内上下文** | 本句里已选定的词，引导后续候选 | 无开关（设计上恒开） | 开 |
@@ -40,7 +40,7 @@ flowchart TD
 
     A --> GATE
     GATE -->|True| S
-    GATE -.->|False · omarime 默认| OFF
+    GATE -.->|False · Macro IME 默认| OFF
     B --> S
 
     S["② State（trigram 状态）<br/>= A + B 折叠后的最近 2 词<br/>PinyinContext::state()"]
@@ -154,7 +154,7 @@ float UserLanguageModel::score(const State &state, const WordNode &word, State &
    - `w=0`：`max(base, base) = base`，用户历史完全失效（= 纯 E6）。
    - `w=1`：`max(base, userScore)`，用户历史有**完全覆盖权**（基础分只在它更高时兜底）。
    - 上游默认 `w=0.2`（`DEFAULT_USER_LANGUAGE_MODEL_USER_WEIGHT = 0.2`，
-     `core/constants.h:18`），即 omarime patch 里的默认 20。
+     `core/constants.h:18`），即 Macro IME patch 里的默认 20。
 3. **`prev` 来自 state**：用户历史是 **bigram**，只看「最近 1 个前词 → 本词」，
    比基础 LM 的三阶窗口短。
 
@@ -210,7 +210,7 @@ State PinyinContext::state() const {
 |---|---|---|
 | **上屏提交（正常路径）** | `pinyin.cpp:244-245` `initPredict` | `if (keepCurrentContext) appendContextWordsWithPinyin(selectedWordsWithPinyin)` — 把刚上屏的词加入句间上下文（主入口） |
 | 预测中 | `pinyin.cpp:274-275` `updatePredict` | `setContextWordsWithPinyin(predictWords_)` — 把预测词设为上下文 |
-| 云拼音提交 | `pinyin.cpp:2584-2585` `cloudPinyinSelected` | `appendContextWordsWithPinyin(words)`（omarime 已移除云拼音入口，恒不走） |
+| 云拼音提交 | `pinyin.cpp:2584-2585` `cloudPinyinSelected` | `appendContextWordsWithPinyin(words)`（Macro IME 已移除云拼音入口，恒不走） |
 | 清场 | `pinyin.cpp:1214,1863,2226,2334` | `clearContextWords()` |
 
 `appendContextWordsWithPinyin`（`pinyincontext.cpp:1086`）只保留**最近 2 个词**
@@ -220,7 +220,7 @@ State PinyinContext::state() const {
 恒为空 → `state()` 里 ① 那段循环不执行 → **句间上下文彻底消失**，
 `state()` 退化为「只有句内词」（句首即 `nullState`）。
 
-> 这是「同拼音候选漂移」的主因，也是 omarime 默认关掉它的原因（§8）。
+> 这是「同拼音候选漂移」的主因，也是 Macro IME 默认关掉它的原因（§8）。
 
 ### B. 句内上下文 — `selected_`（恒开，无开关）
 
@@ -297,19 +297,19 @@ void setConfig(const RawConfig &config) override {
 ```
 
 - DBus `SetConfig`（`fcitx://config/addon/pinyin`）→ `PinyinEngine::setConfig()`
-  → `populateConfig()`，其中 omarime patch 调用
+  → `populateConfig()`，其中 Macro IME patch 调用
   `ime_->model()->setHistoryWeight(*config_.userModelWeight / 100.0f)`
   （`engine/patches/pinyin-usermodelweight.patch`）。
 - `KeepCurrentContext` 在使用点**内联读取**（`pinyin.cpp:244,274,2584` 的
   `*config_.keepCurrentContext`），所以改完下一次上屏/输入即生效。
-- 两者都**无需重启** fcitx5。omarime 的 `bin/omarime-config` 与设置面板
+- 两者都**无需重启** fcitx5。Macro IME 的 `bin/macro-ime-config` 与设置面板
   走的就是这条 DBus 热路径（原子写 + `SetConfig`）。
 
 ---
 
-## 8. omarime 的默认值与理由
+## 8. Macro IME 的默认值与理由
 
-| 旋钮 | pinyin.conf 键 | 范围 | 上游默认 | **omarime 默认** | 热生效 | 作用 |
+| 旋钮 | pinyin.conf 键 | 范围 | 上游默认 | **Macro IME 默认** | 热生效 | 作用 |
 |---|---|---|---|---|---|---|
 | 句间上下文 | `KeepCurrentContext` | bool | `True` | **`False`** | 是 | 上一句是否引导本句候选 |
 | 句内上下文 | —（无键） | — | 恒开 | 恒开 | — | 本句已选词引导后续（设计如此） |
@@ -373,11 +373,11 @@ void setConfig(const RawConfig &config) override {
 
 | 想做什么 | 操作 |
 |---|---|
-| 关/开 句间上下文 | 设置面板「跨句上下文」toggle；或 `omarime-config set context.inter false`；或直接改 `pinyin.conf` 的 `KeepCurrentContext` |
+| 关/开 句间上下文 | 设置面板「跨句上下文」toggle；或 `macro-ime-config set context.inter false`；或直接改 `pinyin.conf` 的 `KeepCurrentContext` |
 | 调 用户历史强度 | 设置面板 / `pinyin.conf` 的 `UserModelWeight`（0–100） |
 | 让"个人化"更强 | 提高 `UserModelWeight`（只加分不降分，可放心调高） |
 | 让"同拼音更稳定" | 关句间（`KeepCurrentContext=False`）——最大杠杆 |
-| 回滚 omarime 全部改动 | `install.sh --undo`（含 `pinyin.conf` 的 backup-first 恢复） |
+| 回滚 Macro IME 全部改动 | `install.sh --undo`（含 `pinyin.conf` 的 backup-first 恢复） |
 
 > 所有改动均走 DBus 热生效（§7），**无需重启 fcitx5**。
 > 安装器默认写入 `KeepCurrentContext=False`（`install.sh` 的

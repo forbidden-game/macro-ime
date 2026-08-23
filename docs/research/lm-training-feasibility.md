@@ -51,8 +51,8 @@ COMMAND LibIME::slm_build_binary -s -a 22 -q 4 trie lm_sc.arpa sc.lm
 
 ```
 原始语料 → 清洗(去重/去HTML/繁转简) → 【分词】→ kenlm lmplz -o3 → ARPA
-                                                              → slm_build_binary trie -q4 → omarime.lm
-                                                              → libime_prediction → omarime.lm.predict
+                                                              → slm_build_binary trie -q4 → macro-ime.lm
+                                                              → libime_prediction → macro-ime.lm.predict
 ```
 
 ⚠️ **词表对齐问题（本项目最重要的技术细节）：**
@@ -91,7 +91,7 @@ libime 解码器按**词典的词条**切格，LM 的分词粒度必须与词典
 
 ## 8. Phase 2 启动顺序（spike 优先）
 
-1. Day 1 spike：拿 zhwiki+THUCNews（~3GB）走通全管线 → 出第一颗 omarime.lm
+1. Day 1 spike：拿 zhwiki+THUCNews（~3GB）走通全管线 → 出第一颗 macro-ime.lm
    → 在 50 个手工测试句上对比老 LM（哪怕只打平，路径即验证）
 2. 然后上大语料（CLUE Small 14GB + 字幕 + 悟道子集）正式训练
 3. 词典 v1 与分词器同步迭代

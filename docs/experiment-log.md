@@ -1,6 +1,6 @@
 # 实验日志 — LM 迭代记录
 
-评测: `eval/omarime-eval.cpp` 编译产物 + 269 句分桶测试集 (`eval/gen_testset_big.py`)
+评测: `eval/macro-ime-eval.cpp` 编译产物 + 269 句分桶测试集 (`eval/gen_testset_big.py`)
 统一条件: 解码词典 = `/usr/share/libime/sc.dict` (30万词条), 贪心首选句 P@1。
 
 | # | 语料 | 词表 | 剪枝 | 大小 | P@1 | 备注 |

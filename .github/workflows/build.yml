@@ -16,18 +16,18 @@ jobs:
 
       - name: Verify pre-built addon (arch, ABI deps, staleness)
         run: |
-          test -f dist/libomarime-state.so || {
-            echo "ERROR: dist/libomarime-state.so not found"
-            echo "Build it: cmake -S engine/omarime-state -B build && cmake --build build && cp build/libomarime-state.so dist/"
+          test -f dist/libmacro-ime-state.so || {
+            echo "ERROR: dist/libmacro-ime-state.so not found"
+            echo "Build it: cmake -S engine/macro-ime-state -B build && cmake --build build && cp build/libmacro-ime-state.so dist/"
             exit 1
           }
-          file dist/libomarime-state.so
-          readelf -h dist/libomarime-state.so | grep -q "Shared object"
-          readelf -h dist/libomarime-state.so | grep -q "X86-64"
+          file dist/libmacro-ime-state.so
+          readelf -h dist/libmacro-ime-state.so | grep -q "Shared object"
+          readelf -h dist/libmacro-ime-state.so | grep -q "X86-64"
           echo "OK: addon is a valid x86-64 ELF shared object"
           # The addon must only depend on fcitx5 runtime libs this project
           # expects (ABI contract: libFcitx5Core.so.7, Config.so.6, Utils.so.2).
-          needed=$(readelf -d dist/libomarime-state.so | grep NEEDED)
+          needed=$(readelf -d dist/libmacro-ime-state.so | grep NEEDED)
           for lib in libFcitx5Core.so.7 libFcitx5Config.so.6 libFcitx5Utils.so.2; do
             echo "$needed" | grep -q "$lib" || { echo "ERROR: missing expected NEEDED dependency: $lib"; exit 1; }
           done
@@ -35,19 +35,19 @@ jobs:
           # Staleness: the committed .so must have been built from the
           # currently committed sources (aggregated hash recorded at build time:
           # cpp + CMakeLists + conf.in).
-          test -f dist/libomarime-state.so.src || {
-            echo "ERROR: dist/libomarime-state.so.src (source hash sidecar) missing"
-            echo "Regenerate: sha256sum engine/omarime-state/omarime-state.cpp engine/omarime-state/CMakeLists.txt engine/omarime-state/omarime-state.conf.in | sha256sum | cut -d' ' -f1 > dist/libomarime-state.so.src"
+          test -f dist/libmacro-ime-state.so.src || {
+            echo "ERROR: dist/libmacro-ime-state.so.src (source hash sidecar) missing"
+            echo "Regenerate: sha256sum engine/macro-ime-state/macro-ime-state.cpp engine/macro-ime-state/CMakeLists.txt engine/macro-ime-state/macro-ime-state.conf.in | sha256sum | cut -d' ' -f1 > dist/libmacro-ime-state.so.src"
             exit 1
           }
-          recorded=$(tr -d '[:space:]' < dist/libomarime-state.so.src)
-          actual=$(sha256sum engine/omarime-state/omarime-state.cpp \
-                             engine/omarime-state/CMakeLists.txt \
-                             engine/omarime-state/omarime-state.conf.in \
+          recorded=$(tr -d '[:space:]' < dist/libmacro-ime-state.so.src)
+          actual=$(sha256sum engine/macro-ime-state/macro-ime-state.cpp \
+                             engine/macro-ime-state/CMakeLists.txt \
+                             engine/macro-ime-state/macro-ime-state.conf.in \
                    | sha256sum | cut -d' ' -f1)
           if [[ "$recorded" != "$actual" ]]; then
-            echo "ERROR: dist/libomarime-state.so is STALE — addon sources changed since it was built."
-            echo "Rebuild: cmake -S engine/omarime-state -B build && cmake --build build && cp build/libomarime-state.so dist/"
+            echo "ERROR: dist/libmacro-ime-state.so is STALE — addon sources changed since it was built."
+            echo "Rebuild: cmake -S engine/macro-ime-state -B build && cmake --build build && cp build/libmacro-ime-state.so dist/"
             echo "  then regenerate the sidecar (see instructions above)"
             exit 1
           fi
@@ -56,17 +56,17 @@ jobs:
       - name: Verify repo structure
         run: |
           for f in install.sh VERSION \
-                    bin/omarime-config \
-                    themes/omarime-theme themes/hook-theme-set.sh \
-                    plugins/omarime.indicator/manifest.json \
-                    plugins/omarime.settings/manifest.json; do
+                    bin/macro-ime-config \
+                    themes/macro-ime-theme themes/hook-theme-set.sh \
+                    plugins/macro-ime.indicator/manifest.json \
+                    plugins/macro-ime.settings/manifest.json; do
             test -f "$f" || { echo "ERROR: missing $f"; exit 1; }
           done
           echo "OK: all required files present"
 
       - name: Lint all shell scripts (syntax)
         run: |
-          for s in install.sh bin/omarime-config themes/omarime-theme themes/hook-theme-set.sh; do
+          for s in install.sh bin/macro-ime-config themes/macro-ime-theme themes/hook-theme-set.sh; do
             bash -n "$s" || { echo "ERROR: syntax error in $s"; exit 1; }
           done
           echo "OK: syntax valid"
@@ -74,7 +74,7 @@ jobs:
       - name: shellcheck all shell scripts
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck install.sh bin/omarime-config themes/omarime-theme themes/hook-theme-set.sh
+          shellcheck install.sh bin/macro-ime-config themes/macro-ime-theme themes/hook-theme-set.sh
           echo "OK: shellcheck clean"
 
       - name: Smoke test install.sh (executable paths)
@@ -114,7 +114,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/libomarime-state.so
+          files: dist/libmacro-ime-state.so
           draft: true
           generate_release_notes: true
         env:

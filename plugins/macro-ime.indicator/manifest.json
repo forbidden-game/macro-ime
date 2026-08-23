@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "omarime.indicator",
-  "name": "omarime IME indicator",
+  "id": "macro-ime.indicator",
+  "name": "Macro IME indicator",
   "version": "0.2.0",
-  "author": "omarime",
+  "author": "Macro IME",
   "description": "中/EN input method state, click toggles",
   "kinds": [
     "bar-widget"
@@ -12,7 +12,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "IME indicator (omarime)",
+    "displayName": "IME indicator (Macro IME)",
     "description": "Chinese/English input method state, click toggles",
     "category": "Input",
     "allowMultiple": false

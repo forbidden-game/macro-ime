@@ -6,6 +6,7 @@ work/
 
 # compiled eval test binaries (sources are tracked)
 eval/test-weight-persist
+eval/macro-ime-eval
 
 # build directory (dist/ holds the committed pre-built addon)
 build/
@@ -17,5 +18,5 @@ build/
 
 # dist/ is tracked (pre-built addon + source sidecar)
 dist/*
-!dist/libomarime-state.so
-!dist/libomarime-state.so.src
+!dist/libmacro-ime-state.so
+!dist/libmacro-ime-state.so.src

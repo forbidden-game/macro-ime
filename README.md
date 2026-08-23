@@ -1,8 +1,8 @@
-# omarime
+# Macro IME
 
 **让 Linux 中文输入兼具现代算法、系统级美学与高效交互。**
 
-omarime 是专为 Omarchy 及 Wayland 桌面打造的现代中文输入解决方案。项目基于 fcitx5 与 libime 解码架构，通过自研训练的亿级现代语料语言模型（omarime LM）与深度打磨的 Quickshell 原生交互层，解决传统 Linux 中文输入法模型陈旧、候选生硬与桌面割裂等痛点。
+Macro IME 是专为 Omarchy 及 Wayland 桌面打造的现代中文输入解决方案。项目基于 fcitx5 与 libime 解码架构，通过自研训练的亿级现代语料语言模型（Macro IME LM）与深度打磨的 Quickshell 原生交互层，解决传统 Linux 中文输入法模型陈旧、候选生硬与桌面割裂等痛点。
 
 ---
 
@@ -30,7 +30,7 @@ omarime 是专为 Omarchy 及 Wayland 桌面打造的现代中文输入解决方
 
 ### 数据集与训练流水线
 
-官方 fcitx5 预装语言模型主要基于早期语料（约 2008 年），三元组规模仅 219 万条，难以应对现代中文表达。omarime 重新构建了现代多领域语料与训练管线：
+官方 fcitx5 预装语言模型主要基于早期语料（约 2008 年），三元组规模仅 219 万条，难以应对现代中文表达。Macro IME 重新构建了现代多领域语料与训练管线：
 
 1. **语料组成（共计 8,303 万句）**：
    - **维基百科 (zhwiki)**：4,417 万句，提供基础实体与规范表达覆盖。
@@ -46,9 +46,9 @@ omarime 是专为 Omarchy 及 Wayland 桌面打造的现代中文输入解决方
 
 ### 评测表现 (Benchmarks)
 
-使用 `omarime-eval` 驱动底层 libime 解码器，在覆盖 7 个领域的 269 句标准分桶测试集上评估首选句准确率（Top-1 P@1）：
+使用 `macro-ime-eval` 驱动底层 libime 解码器，在覆盖 7 个领域的 269 句标准分桶测试集上评估首选句准确率（Top-1 P@1）：
 
-| 测试域 | 样本量 | 官方原版 (Stock LM) | omarime LM | 准确率提升 |
+| 测试域 | 样本量 | 官方原版 (Stock LM) | Macro IME LM | 准确率提升 |
 |---|---|---|---|---|
 | 日常口语 | 94 | 92.6% | **98.9%** | +6.3% |
 | 时事新闻 | 50 | 96.0% | **100.0%** | +4.0% |
@@ -63,10 +63,10 @@ omarime 是专为 Omarchy 及 Wayland 桌面打造的现代中文输入解决方
 
 ## 安装与卸载
 
-安装器采用非侵入设计，所有文件安装在用户目录（`~/.local/share/omarime/`），通过 systemd user drop-in（`LIBIME_MODEL_DIRS`）加载模型，**无需 root 权限，不修改任何 `/usr` 系统文件**。
+安装器采用非侵入设计，所有文件安装在用户目录（`~/.local/share/macro-ime/`），通过 systemd user drop-in（`LIBIME_MODEL_DIRS`）加载模型，**无需 root 权限，不修改任何 `/usr` 系统文件**。
 
 ```bash
-git clone https://github.com/forbidden-game/omarime.git && cd omarime
+git clone https://github.com/forbidden-game/macro-ime.git && cd macro-ime
 ./install.sh
 ```
 
@@ -91,15 +91,15 @@ flowchart TD
     end
 
     subgraph Runtime ["运行时与通信链路"]
-        ADDON["libomarime-state.so (C++ 事件插件)"]
-        STATE["$XDG_RUNTIME_DIR/omarime/state (inotify)"]
+        ADDON["libmacro-ime-state.so (C++ 事件插件)"]
+        STATE["$XDG_RUNTIME_DIR/macro-ime/state (inotify)"]
         DBUS["Controller1 DBus API"]
     end
 
     subgraph Engine ["输入引擎 (fcitx5 + libime)"]
         CORE["fcitx5 核心"]
         DECODER["Lattice / Viterbi 解码器"]
-        LM["omarime LM (~442MB 二进制模型)"]
+        LM["Macro IME LM (~442MB 二进制模型)"]
         USER_LM["UserLanguageModel + HistoryBigram"]
     end
 
@@ -121,4 +121,3 @@ flowchart TD
 - 核心代码遵循 MIT 许可证。
 - 感谢 [fcitx5](https://github.com/fcitx/fcitx5) 与 [libime](https://github.com/fcitx/libime) 提供的输入框架与解码算法支持。
 - 语料与词库数据遵循各自原始开源及科研授权协议。
-

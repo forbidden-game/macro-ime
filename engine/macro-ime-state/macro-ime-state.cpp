@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Event-driven fcitx5 → omarime-shell state bridge.
+// Event-driven fcitx5 → macro-ime state bridge.
 
 #include <cstdlib>
 #include <filesystem>
@@ -18,12 +18,12 @@
 
 namespace fcitx {
 
-class OmarimeState final : public AddonInstance {
+class MacroImeState final : public AddonInstance {
 public:
-    explicit OmarimeState(Instance *instance) : instance_(instance) {
+    explicit MacroImeState(Instance *instance) : instance_(instance) {
         if (const char *runtime = std::getenv("XDG_RUNTIME_DIR");
             runtime && *runtime) {
-            statePath_ = std::filesystem::path(runtime) / "omarime" / "state";
+            statePath_ = std::filesystem::path(runtime) / "macro-ime" / "state";
             std::error_code error;
             std::filesystem::create_directories(statePath_.parent_path(), error);
         }
@@ -36,7 +36,7 @@ public:
         publish(instance_->mostRecentInputContext());
     }
 
-    ~OmarimeState() override { publishState(0, true); }
+    ~MacroImeState() override { publishState(0, true); }
 
 private:
     void watch(EventType type) {
@@ -79,7 +79,7 @@ private:
             publishState(0);
             return;
         }
-        // omarime's active input method is pinyin; keyboard-* is fcitx5's
+        // Macro IME's active input method is pinyin; keyboard-* is fcitx5's
         // inactive/English state. Keep the bridge product-specific and exact.
         publishState(instance_->inputMethod(context) == "pinyin" ? 2 : 1);
     }
@@ -105,13 +105,13 @@ private:
     std::vector<std::unique_ptr<HandlerTableEntry<EventHandler>>> handlers_;
 };
 
-class OmarimeStateFactory final : public AddonFactory {
+class MacroImeStateFactory final : public AddonFactory {
 public:
     AddonInstance *create(AddonManager *manager) override {
-        return new OmarimeState(manager->instance());
+        return new MacroImeState(manager->instance());
     }
 };
 
 } // namespace fcitx
 
-FCITX_ADDON_FACTORY_V2_BACKWARDS(omarime_state, fcitx::OmarimeStateFactory)
+FCITX_ADDON_FACTORY_V2_BACKWARDS(macro_ime_state, fcitx::MacroImeStateFactory)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""omarime 语料清洗 v0 (Spike)
+"""Macro IME 语料清洗 v0 (Spike)
 
 输入: wikiextractor 产出的 AA/wiki_00 ... 文本文件
 处理: 去<doc>标签 → 繁转简 → 按标点切句 → 保留高汉字占比句 → 去重
@@ -45,7 +45,7 @@ def work(args):
 def main(indir, dst, workers=12):
     files = sorted(glob.glob(f"{indir}/**/wiki_*", recursive=True))
     import os, tempfile
-    tmpdir = tempfile.mkdtemp(prefix='omarime-clean-')
+    tmpdir = tempfile.mkdtemp(prefix='macro-ime-clean-')
     jobs = [(p, os.path.join(tmpdir, f"part{i:04d}")) for i, p in enumerate(files)]
     with Pool(workers) as p:
         counts = p.map(work, jobs)

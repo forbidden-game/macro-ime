@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# omarime-config — safely read/write persistent fcitx5 settings.
+# macro-ime-config — safely read/write persistent fcitx5 settings.
 #
 # Persistent addon values go through Controller1.SetConfig, which updates
 # fcitx5's memory and its config file atomically (the same path as
 # fcitx5-configtool). A stop → edit → start fallback covers unavailable DBus.
 #
 # Usage:
-#   omarime-config get-all --json
-#   omarime-config get <key>
-#   omarime-config set <key> <value>      # values: true/false, None/QWERTY
-#   omarime-config action theme-regenerate | userdict-reset
+#   macro-ime-config get-all --json
+#   macro-ime-config get <key>
+#   macro-ime-config set <key> <value>      # values: true/false, None/QWERTY
+#   macro-ime-config action theme-regenerate | userdict-reset
 #
 # Keys:
 #   im.active            bool    current input state (set runs fcitx5-remote -o/-c)
@@ -25,9 +25,9 @@ set -euo pipefail
 CONF_DIR="${HOME}/.config/fcitx5/conf"
 PYCONF="${CONF_DIR}/pinyin.conf"
 UICONF="${CONF_DIR}/classicui.conf"
-OMARIME_HOME="${HOME}/.local/share/omarime"
+MACRO_IME_HOME="${HOME}/.local/share/macro-ime"
 
-die() { echo "omarime-config: $*" >&2; exit 1; }
+die() { echo "macro-ime-config: $*" >&2; exit 1; }
 
 # --- service transaction ------------------------------------------------------
 # If we have to stop fcitx5 to edit its files, we owe it a restart: whatever
@@ -214,7 +214,7 @@ case ${1:-} in
   action)
     case ${2:-} in
       theme-regenerate)
-        exec "${OMARIME_HOME}/themes/omarime-theme" -q ;;
+        exec "${MACRO_IME_HOME}/themes/macro-ime-theme" -q ;;
       userdict-reset)
         stop_fcitx
         rm -f "${HOME}/.local/share/fcitx5/pinyin/user.dict" \

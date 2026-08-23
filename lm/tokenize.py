@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""omarime 分词器 v0 (Spike)
+"""Macro IME 分词器 v0 (Spike)
 
 词典驱动的正向最长匹配 (FMM):
   - pyahocorasick 自动机加载词表

@@ -1,12 +1,12 @@
 # Gboard research program (黑盒研究计划)
 
 目的：把 Gboard/谷歌拼音的"越用越好用"拆解成可实现的工程规格，用于校准
-omarime 的 Phase 2（数据/LM）和 Phase 6（神经方向）。
+Macro IME 的 Phase 2（数据/LM）和 Phase 6（神经方向）。
 
 ## 铁律 (non-negotiable guardrails)
 
 1. **只研究，不搬运。** Gboard 是专有软件。它的词库、语言模型、二进制、
-   资源文件一律不得进入 omarime 仓库或派生数据。我们只提取**知识**：
+   资源文件一律不得进入 Macro IME 仓库或派生数据。我们只提取**知识**：
    架构思路、文件格式特征、尺寸量级、行为规格。
 2. `research/apk/` 已加入 `.gitignore`，任何 APK/解包产物永不 commit。
 3. 行为结论必须可验证（可复现的输入→输出实验），不靠印象。
@@ -55,7 +55,7 @@ omarime 的 Phase 2（数据/LM）和 Phase 6（神经方向）。
 - Google IME 在 **PD 数据集**（人民日报 92-98，2000 测试句）：
   **P@1 = 70.9 / P@2 = 78.3 / P@3 = 82.3**（arXiv:2203.00249 实测）
 - PinyinGPT（学术 SOTA，beam=16）：P@1 = 73.15 / P@2 = 84.10 / P@3 = 85.45
-- **omarime 目标线：trigram 版 P@1 ≥ 60（超 2008 老 LM），神经版 ≥ 70.9
+- **Macro IME 目标线：trigram 版 P@1 ≥ 60（超 2008 老 LM），神经版 ≥ 70.9
   （宣称"Gboard 级"前必须过这条线）**
 - PD 测试集可直接用于我们 eval harness 的新闻域基准（训练集语料注意
   时代偏差，另建现代语料测试桶）。

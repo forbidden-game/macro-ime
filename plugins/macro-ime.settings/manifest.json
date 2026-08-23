@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "omarime.settings",
-  "name": "omarime settings",
+  "id": "macro-ime.settings",
+  "name": "Macro IME settings",
   "version": "0.1.0",
-  "author": "omarime",
+  "author": "Macro IME",
   "description": "中文输入法设置面板",
   "kinds": [
     "menu"
