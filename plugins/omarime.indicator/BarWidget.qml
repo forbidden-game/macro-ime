@@ -114,7 +114,7 @@ BarWidget {
     fontSize: Style.font.caption
     horizontalMargin: 6
     foreground: root.bar ? root.bar.barForeground : Color.foreground
-    tooltipText: root.imActive ? "中文输入法 · 左键切换 · 右键设置" : "英文 · 左键切换 · 右键设置"
+    tooltipText: root.imActive ? "Macro IME · 中文 (左键切换 · 右键设置)" : "Macro IME · 英文 (左键切换 · 右键设置)"
     onPressed: function(button) {
       if (button === 2) {
         // right-click → settings panel

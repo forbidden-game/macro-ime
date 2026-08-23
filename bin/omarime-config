@@ -176,6 +176,10 @@ case ${1:-} in
     set_value "$2" "$3"
     get_value "$2" ;;
   get-all)
+    dict_size=0
+    history_size=0
+    [[ -f "${HOME}/.local/share/fcitx5/pinyin/user.dict" ]] && dict_size=$(stat -c%s "${HOME}/.local/share/fcitx5/pinyin/user.dict" 2>/dev/null || echo 0)
+    [[ -f "${HOME}/.local/share/fcitx5/pinyin/user.history" ]] && history_size=$(stat -c%s "${HOME}/.local/share/fcitx5/pinyin/user.history" 2>/dev/null || echo 0)
     jq -n \
       --argjson imActive "$(get_value im.active)" \
       --argjson vertical "$(get_value candidates.vertical)" \
@@ -195,6 +199,8 @@ case ${1:-} in
       --argjson v_u "$(get_value fuzzy.v_u)" \
       --argjson u_ou "$(get_value fuzzy.u_ou)" \
       --argjson userModelWeight "$(get_value usermodel.weight)" \
+      --argjson dictBytes "$dict_size" \
+      --argjson historyBytes "$history_size" \
       '{imActive:$imActive, vertical:$vertical, contextInter:$contextInter, correction:$correction,
         fuzzy:{an_ang:$an_ang, en_eng:$en_eng, in_ing:$in_ing, ian_iang:$ian_iang,
                uan_uang:$uan_uang, c_ch:$c_ch, s_sh:$s_sh, z_zh:$z_zh, l_n:$l_n,
@@ -202,7 +208,9 @@ case ${1:-} in
                anAng:$an_ang, enEng:$en_eng, inIng:$in_ing, ianIang:$ian_iang,
                uanUang:$uan_uang, cCh:$c_ch, sSh:$s_sh, zZh:$z_zh, lN:$l_n,
                fH:$f_h, lR:$l_r, vU:$v_u, uOu:$u_ou},
-        userModelWeight:$userModelWeight}' ;;
+        userModelWeight:$userModelWeight,
+        dictBytes:$dictBytes,
+        historyBytes:$historyBytes}' ;;
   action)
     case ${2:-} in
       theme-regenerate)
@@ -226,7 +234,20 @@ case ${1:-} in
           esac
         done
         echo fuzzy-preset-ok ;;
-      *) die "action: theme-regenerate | userdict-reset | fuzzy-clear | fuzzy-preset-common" ;;
+      fuzzy-group-set)
+        group=${3:-}
+        val=${4:-false}
+        case $group in
+          shuang) pairs="z_zh c_ch s_sh" ;;
+          bi) pairs="an_ang en_eng in_ing ian_iang uan_uang" ;;
+          sheng_yun) pairs="l_n f_h l_r v_u u_ou" ;;
+          *) die "unknown group: $group" ;;
+        esac
+        for pair in $pairs; do
+          set_value "fuzzy.$pair" "$val" >/dev/null
+        done
+        echo fuzzy-group-ok ;;
+      *) die "action: theme-regenerate | userdict-reset | fuzzy-clear | fuzzy-preset-common | fuzzy-group-set" ;;
     esac ;;
   *)
     grep '^#' "$0" | sed 's/^# \?//' | head -20
