@@ -181,24 +181,27 @@ case ${1:-} in
       --argjson vertical "$(get_value candidates.vertical)" \
       --argjson contextInter "$(get_value context.inter)" \
       --arg correction "$(get_value correction)" \
-      --argjson anAng "$(get_value fuzzy.an_ang)" \
-      --argjson enEng "$(get_value fuzzy.en_eng)" \
-      --argjson inIng "$(get_value fuzzy.in_ing)" \
-      --argjson ianIang "$(get_value fuzzy.ian_iang)" \
-      --argjson uanUang "$(get_value fuzzy.uan_uang)" \
-      --argjson cCh "$(get_value fuzzy.c_ch)" \
-      --argjson sSh "$(get_value fuzzy.s_sh)" \
-      --argjson zZh "$(get_value fuzzy.z_zh)" \
-      --argjson lN "$(get_value fuzzy.l_n)" \
-      --argjson fH "$(get_value fuzzy.f_h)" \
-      --argjson lR "$(get_value fuzzy.l_r)" \
-      --argjson vU "$(get_value fuzzy.v_u)" \
-      --argjson uOu "$(get_value fuzzy.u_ou)" \
+      --argjson an_ang "$(get_value fuzzy.an_ang)" \
+      --argjson en_eng "$(get_value fuzzy.en_eng)" \
+      --argjson in_ing "$(get_value fuzzy.in_ing)" \
+      --argjson ian_iang "$(get_value fuzzy.ian_iang)" \
+      --argjson uan_uang "$(get_value fuzzy.uan_uang)" \
+      --argjson c_ch "$(get_value fuzzy.c_ch)" \
+      --argjson s_sh "$(get_value fuzzy.s_sh)" \
+      --argjson z_zh "$(get_value fuzzy.z_zh)" \
+      --argjson l_n "$(get_value fuzzy.l_n)" \
+      --argjson f_h "$(get_value fuzzy.f_h)" \
+      --argjson l_r "$(get_value fuzzy.l_r)" \
+      --argjson v_u "$(get_value fuzzy.v_u)" \
+      --argjson u_ou "$(get_value fuzzy.u_ou)" \
       --argjson userModelWeight "$(get_value usermodel.weight)" \
       '{imActive:$imActive, vertical:$vertical, contextInter:$contextInter, correction:$correction,
-        fuzzy:{anAng:$anAng, enEng:$enEng, inIng:$inIng, ianIang:$ianIang,
-               uanUang:$uanUang, cCh:$cCh, sSh:$sSh, zZh:$zZh, lN:$lN,
-               fH:$fH, lR:$lR, vU:$vU, uOu:$uOu},
+        fuzzy:{an_ang:$an_ang, en_eng:$en_eng, in_ing:$in_ing, ian_iang:$ian_iang,
+               uan_uang:$uan_uang, c_ch:$c_ch, s_sh:$s_sh, z_zh:$z_zh, l_n:$l_n,
+               f_h:$f_h, l_r:$l_r, v_u:$v_u, u_ou:$u_ou,
+               anAng:$an_ang, enEng:$en_eng, inIng:$in_ing, ianIang:$ian_iang,
+               uanUang:$uan_uang, cCh:$c_ch, sSh:$s_sh, zZh:$z_zh, lN:$l_n,
+               fH:$f_h, lR:$l_r, vU:$v_u, uOu:$u_ou},
         userModelWeight:$userModelWeight}' ;;
   action)
     case ${2:-} in
@@ -210,7 +213,20 @@ case ${1:-} in
               "${HOME}/.local/share/fcitx5/pinyin/user.history"
         restart_fcitx
         echo reset-ok ;;
-      *) die "action: theme-regenerate | userdict-reset" ;;
+      fuzzy-clear)
+        for pair in an_ang en_eng in_ing ian_iang uan_uang c_ch s_sh z_zh l_n f_h l_r v_u u_ou; do
+          set_value "fuzzy.$pair" "false" >/dev/null
+        done
+        echo fuzzy-clear-ok ;;
+      fuzzy-preset-common)
+        for pair in an_ang en_eng in_ing ian_iang uan_uang c_ch s_sh z_zh l_n f_h l_r v_u u_ou; do
+          case $pair in
+            z_zh|c_ch|s_sh|an_ang|en_eng|in_ing|l_n) set_value "fuzzy.$pair" "true" >/dev/null ;;
+            *) set_value "fuzzy.$pair" "false" >/dev/null ;;
+          esac
+        done
+        echo fuzzy-preset-ok ;;
+      *) die "action: theme-regenerate | userdict-reset | fuzzy-clear | fuzzy-preset-common" ;;
     esac ;;
   *)
     grep '^#' "$0" | sed 's/^# \?//' | head -20

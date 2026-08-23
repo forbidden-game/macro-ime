@@ -24,30 +24,45 @@ Item {
   readonly property string configBin: Quickshell.env("HOME") + "/.local/share/omarime/bin/omarime-config"
 
   // ---- state model, populated by omarime-config get-all --json
-    property bool imActive: false
+  property bool imActive: false
   property bool vertical: false
   property string correction: "None"
   property var fuzzy: ({})
-  property bool contextInter: true
+  property bool contextInter: false
   property int userModelWeight: 20
   property bool busy: false
   property bool confirmReset: false
   property string notice: ""
 
-  readonly property var fuzzyPairs: [
-    { key: "an_ang",   label: "an=ang" },
-    { key: "en_eng",   label: "en=eng" },
-    { key: "in_ing",   label: "in=ing" },
-    { key: "ian_iang", label: "ian=iang" },
-    { key: "uan_uang", label: "uan=uang" },
-    { key: "c_ch",     label: "c=ch" },
-    { key: "s_sh",     label: "s=sh" },
-    { key: "z_zh",     label: "z=zh" },
-    { key: "l_n",      label: "l=n" },
-    { key: "f_h",      label: "f=h" },
-    { key: "l_r",      label: "l=r" },
-    { key: "v_u",      label: "v=u" },
-    { key: "u_ou",     label: "u=ou" }
+  readonly property var fuzzyCategories: [
+    {
+      name: "平翘舌音",
+      pairs: [
+        { key: "z_zh", label: "z ↔ zh" },
+        { key: "c_ch", label: "c ↔ ch" },
+        { key: "s_sh", label: "s ↔ sh" }
+      ]
+    },
+    {
+      name: "前后鼻音",
+      pairs: [
+        { key: "an_ang",   label: "an ↔ ang" },
+        { key: "en_eng",   label: "en ↔ eng" },
+        { key: "in_ing",   label: "in ↔ ing" },
+        { key: "ian_iang", label: "ian ↔ iang" },
+        { key: "uan_uang", label: "uan ↔ uang" }
+      ]
+    },
+    {
+      name: "声/韵母混淆",
+      pairs: [
+        { key: "l_n",  label: "l ↔ n" },
+        { key: "f_h",  label: "f ↔ h" },
+        { key: "l_r",  label: "l ↔ r" },
+        { key: "v_u",  label: "v ↔ u" },
+        { key: "u_ou", label: "u ↔ ou" }
+      ]
+    }
   ]
 
   function open(payloadJson) {
@@ -105,268 +120,432 @@ Item {
       focus: root.opened
       Keys.onEscapePressed: root.close()
       anchors.centerIn: parent
-      width: Math.min(520, panel.width - Style.space(40))
-      height: Math.min(contentCol.implicitHeight + Style.space(44), panel.height - Style.space(40))
+      width: Math.min(540, panel.width - Style.space(40))
+      height: Math.min(scrollContent.implicitHeight + Style.space(48), panel.height - Style.space(40))
       radius: Style.cornerRadius
       color: Color.popups.background
       border.width: Math.max(1, Style.space(2))
       border.color: Color.popups.border
 
-      Column {
-        id: contentCol
-        anchors.centerIn: parent
-        width: parent.width - Style.space(44)
-        spacing: Style.spacing.md
+      Flickable {
+        id: flick
+        anchors.fill: parent
+        anchors.margins: Style.space(20)
+        contentWidth: width
+        contentHeight: scrollContent.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
 
-        // header
-        Item {
-          width: parent.width
-          height: titleText.implicitHeight
-
-          Text {
-            id: titleText
-            text: "omarime · 中文输入"
-            color: Color.foreground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.title
-            font.bold: true
-            anchors.left: parent.left
-          }
-
-          Text {
-            text: "✕"
-            color: Color.foreground
-            opacity: 0.6
-            font.pixelSize: Style.font.subtitle
-            anchors.right: parent.right
-            anchors.verticalCenter: titleText.verticalCenter
-
-            MouseArea {
-              anchors.fill: parent
-              anchors.margins: -Style.space(8)
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.close()
-            }
-          }
-        }
-
-        Toggle {
-          width: parent.width
-          label: "中文输入"
-          description: "当前输入状态 · Ctrl+Space 切换"
-          checked: root.imActive
-          enabled: !root.busy
-          onClicked: root.apply("im.active", !root.imActive ? "true" : "false")
-        }
-
-        Toggle {
-          width: parent.width
-          label: "竖排候选"
-          description: "候选词纵向排列"
-          checked: root.vertical
-          enabled: !root.busy
-          onClicked: root.apply("candidates.vertical", !root.vertical ? "true" : "false")
-        }
-
-        // correction segmented
         Column {
+          id: scrollContent
           width: parent.width
-          spacing: Style.spacing.xs
+          spacing: Style.spacing.md
 
-          Text {
-            text: "拼音纠错（键盘邻键）"
-            color: Color.foreground
-            opacity: 0.85
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          Row {
-            spacing: Style.spacing.sm
-
-            Button {
-              text: "关"
-              selected: root.correction === "None"
-              focusable: true
-              enabled: !root.busy
-              onClicked: root.apply("correction", "None")
-            }
-            Button {
-              text: "QWERTY 邻键"
-              selected: root.correction === "QWERTY"
-              focusable: true
-              enabled: !root.busy
-              onClicked: root.apply("correction", "QWERTY")
-            }
-          }
-        }
-
-        // user model weight
-        Column {
-          width: parent.width
-          spacing: Style.spacing.xs
-
-          Text {
-            text: "用户模型强度（影响缩写候选排序）"
-            color: Color.foreground
-            opacity: 0.85
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          Row {
-            spacing: Style.spacing.sm
-
-            Button {
-              text: "关"
-              selected: root.userModelWeight === 0
-              focusable: true
-              enabled: !root.busy
-              onClicked: root.apply("usermodel.weight", "0")
-            }
-            Button {
-              text: "弱"
-              selected: root.userModelWeight === 10
-              focusable: true
-              enabled: !root.busy
-              onClicked: root.apply("usermodel.weight", "10")
-            }
-            Button {
-              text: "默认"
-              selected: root.userModelWeight === 20
-              focusable: true
-              enabled: !root.busy
-              onClicked: root.apply("usermodel.weight", "20")
-            }
-            Button {
-              text: "中"
-              selected: root.userModelWeight === 50
-              focusable: true
-              enabled: !root.busy
-              onClicked: root.apply("usermodel.weight", "50")
-            }
-            Button {
-              text: "强"
-              selected: root.userModelWeight === 100
-              focusable: true
-              enabled: !root.busy
-              onClicked: root.apply("usermodel.weight", "100")
-            }
-          }
-        }
-
-        Toggle {
-          width: parent.width
-          label: "跨句上下文"
-          description: "上屏句尾两词参与后续候选排序 · 关闭后同拼音候选更稳定"
-          checked: root.contextInter
-          enabled: !root.busy
-          onClicked: root.apply("context.inter", !root.contextInter ? "true" : "false")
-        }
-
-        // fuzzy grid
-        Column {
-          width: parent.width
-          spacing: Style.spacing.xs
-
-          Text {
-            text: "模糊音（全部关闭时最精准）"
-            color: Color.foreground
-            opacity: 0.85
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          Grid {
+          // Header
+          Item {
             width: parent.width
-            columns: 4
-            columnSpacing: Style.spacing.xs
-            rowSpacing: Style.spacing.xxs
+            height: titleText.implicitHeight
+
+            Row {
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.sm
+
+              Text {
+                id: titleText
+                text: "omarime · 中文输入设置"
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.title
+                font.bold: true
+              }
+            }
+
+            Text {
+              text: "✕"
+              color: Color.foreground
+              opacity: 0.6
+              font.pixelSize: Style.font.subtitle
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+
+              MouseArea {
+                anchors.fill: parent
+                anchors.margins: -Style.space(8)
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.close()
+              }
+            }
+          }
+
+          // ------------------------------------------------ 1. 界面与排版
+          PanelSeparator { foreground: Color.foreground }
+
+          PanelSectionHeader {
+            text: "界面与排版"
+            foreground: Color.foreground
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.md
+
+            Column {
+              width: parent.width - dirButtons.width - parent.spacing
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.xxs
+
+              Text {
+                text: "候选词排列"
+                color: Color.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+
+              Text {
+                text: "候选词窗口横向或纵向列表布局"
+                color: Qt.darker(Color.foreground, 1.5)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Row {
+              id: dirButtons
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.xs
+
+              Button {
+                text: "横排 (默认)"
+                selected: !root.vertical
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("candidates.vertical", "false")
+              }
+              Button {
+                text: "竖排"
+                selected: root.vertical
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("candidates.vertical", "true")
+              }
+            }
+          }
+
+          // ------------------------------------------------ 2. 智能输入与习惯
+          PanelSeparator { foreground: Color.foreground }
+
+          PanelSectionHeader {
+            text: "智能输入与习惯"
+            foreground: Color.foreground
+          }
+
+          // User habit adaptation weight
+          Column {
+            width: parent.width
+            spacing: Style.spacing.xs
+
+            Text {
+              text: "个人习惯记忆 (自适应学习)"
+              color: Color.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            Text {
+              text: "根据打字历史动态提升个人常用词优先级（只提权不降权）"
+              color: Qt.darker(Color.foreground, 1.5)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Row {
+              spacing: Style.spacing.xs
+
+              Button {
+                text: "关闭"
+                selected: root.userModelWeight === 0
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("usermodel.weight", "0")
+              }
+              Button {
+                text: "轻度"
+                selected: root.userModelWeight === 10
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("usermodel.weight", "10")
+              }
+              Button {
+                text: "推荐"
+                selected: root.userModelWeight === 20
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("usermodel.weight", "20")
+              }
+              Button {
+                text: "较强"
+                selected: root.userModelWeight === 50
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("usermodel.weight", "50")
+              }
+              Button {
+                text: "极速"
+                selected: root.userModelWeight === 100
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("usermodel.weight", "100")
+              }
+            }
+          }
+
+          // Pinyin correction
+          Column {
+            width: parent.width
+            spacing: Style.spacing.xs
+
+            Text {
+              text: "键盘邻键容错"
+              color: Color.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            Text {
+              text: "自动纠正误触相邻键的拼音拼写错误"
+              color: Qt.darker(Color.foreground, 1.5)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Row {
+              spacing: Style.spacing.xs
+
+              Button {
+                text: "关闭"
+                selected: root.correction === "None"
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("correction", "None")
+              }
+              Button {
+                text: "QWERTY 邻键纠错"
+                selected: root.correction === "QWERTY"
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.apply("correction", "QWERTY")
+              }
+            }
+          }
+
+          // Cross-sentence context
+          Toggle {
+            width: parent.width
+            label: "跨句连续上下文联想"
+            description: "上一句上屏词参与下一句首词预测 · 关闭后相同拼音首选词更稳定"
+            checked: root.contextInter
+            enabled: !root.busy
+            onClicked: root.apply("context.inter", !root.contextInter ? "true" : "false")
+          }
+
+          // ------------------------------------------------ 3. 模糊音匹配
+          PanelSeparator { foreground: Color.foreground }
+
+          Item {
+            width: parent.width
+            height: Math.max(fuzzyHeaderCol.implicitHeight, fuzzyActionsRow.implicitHeight)
+
+            Column {
+              id: fuzzyHeaderCol
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.xxs
+
+              PanelSectionHeader {
+                text: "模糊音匹配"
+                foreground: Color.foreground
+              }
+
+              Text {
+                text: "全部关闭时拼音匹配最精准"
+                color: Qt.darker(Color.foreground, 1.5)
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Row {
+              id: fuzzyActionsRow
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.xs
+
+              Button {
+                text: "全部关闭"
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.runAction("fuzzy-clear")
+              }
+              Button {
+                text: "南方常用"
+                bordered: true
+                focusable: true
+                enabled: !root.busy
+                onClicked: root.runAction("fuzzy-preset-common")
+              }
+            }
+          }
+
+          // Fuzzy groups
+          Column {
+            width: parent.width
+            spacing: Style.spacing.xs
 
             Repeater {
-              model: root.fuzzyPairs
+              model: root.fuzzyCategories
 
-              delegate: Rectangle {
-                id: fuzzyItem
+              delegate: Column {
                 required property var modelData
-                readonly property bool on: root.fuzzy[modelData.key] === true
-
-                function togglePair() {
-                  if (!root.busy) root.apply("fuzzy." + modelData.key, !on ? "true" : "false")
-                }
-
-                activeFocusOnTab: true
-                Keys.onReturnPressed: togglePair()
-                Keys.onEnterPressed: togglePair()
-                Keys.onSpacePressed: togglePair()
-
-                width: (parent.width - (parent.columns - 1) * parent.columnSpacing) / parent.columns
-                height: Style.space(30)
-                radius: Style.cornerRadius
-                color: on ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.20) : Style.controlFill(false, mouse.containsMouse, Color.foreground, Color.accent)
-                border.width: 1
-                border.color: on || activeFocus ? Color.accent : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.25)
+                width: parent.width
+                spacing: Style.spacing.xxs
 
                 Text {
-                  anchors.centerIn: parent
-                  text: modelData.label
-                  color: Color.foreground
-                  opacity: fuzzyItem.on ? 1.0 : 0.75
+                  text: "［" + modelData.name + "］"
+                  color: Qt.darker(Color.foreground, 1.3)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
+                  font.bold: true
                 }
 
-                MouseArea {
-                  id: mouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  enabled: !root.busy
-                  onClicked: parent.togglePair()
+                Flow {
+                  width: parent.width
+                  spacing: Style.spacing.xs
+
+                  Repeater {
+                    model: modelData.pairs
+
+                    delegate: Rectangle {
+                      id: fuzzyItem
+                      required property var modelData
+                      readonly property bool on: root.fuzzy[modelData.key] === true
+
+                      function togglePair() {
+                        if (!root.busy) root.apply("fuzzy." + modelData.key, !on ? "true" : "false")
+                      }
+
+                      activeFocusOnTab: true
+                      Keys.onReturnPressed: togglePair()
+                      Keys.onEnterPressed: togglePair()
+                      Keys.onSpacePressed: togglePair()
+
+                      width: Style.space(92)
+                      height: Style.space(28)
+                      radius: Style.cornerRadius
+                      color: on ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.22) : Style.controlFill(false, mouse.containsMouse, Color.foreground, Color.accent)
+                      border.width: 1
+                      border.color: on || activeFocus ? Color.accent : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: modelData.label
+                        color: Color.foreground
+                        opacity: fuzzyItem.on ? 1.0 : 0.75
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        font.bold: fuzzyItem.on
+                      }
+
+                      MouseArea {
+                        id: mouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        enabled: !root.busy
+                        onClicked: parent.togglePair()
+                      }
+                    }
+                  }
                 }
               }
             }
           }
-        }
 
-        // actions
-        Row {
-          spacing: Style.spacing.sm
+          // ------------------------------------------------ 4. 词库与系统维护
+          PanelSeparator { foreground: Color.foreground }
 
-          Button {
-            text: busy ? "…" : "重新生成主题"
-            bordered: true
-            focusable: true
-            enabled: !root.busy
-            onClicked: root.runAction("theme-regenerate")
+          PanelSectionHeader {
+            text: "词库与系统维护"
+            foreground: Color.foreground
           }
-          Button {
-            text: busy ? "…" : (root.confirmReset ? "再次点击确认清空" : "清空用户词典")
-            bordered: true
-            focusable: true
-            enabled: !root.busy
-            onClicked: {
-              if (!root.confirmReset) {
-                root.confirmReset = true
-                root.notice = "清空不可撤销；请在 5 秒内再次点击确认"
-                resetConfirmTimer.restart()
-              } else {
-                root.confirmReset = false
-                resetConfirmTimer.stop()
-                root.runAction("userdict-reset")
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.sm
+
+            Button {
+              text: root.busy ? "…" : "刷新输入法主题"
+              bordered: true
+              focusable: true
+              enabled: !root.busy
+              onClicked: root.runAction("theme-regenerate")
+            }
+
+            Button {
+              text: root.busy ? "…" : (root.confirmReset ? "⚠ 再次点击确认清空 (5s)" : "清空个人自学词库")
+              bordered: true
+              focusable: true
+              enabled: !root.busy
+              accent: root.confirmReset ? Color.urgent : Color.accent
+              foreground: root.confirmReset ? Color.urgent : Color.foreground
+              onClicked: {
+                if (!root.confirmReset) {
+                  root.confirmReset = true
+                  root.notice = "清空不可撤销：将重置所有自学习词汇与个性化词频"
+                  resetConfirmTimer.restart()
+                } else {
+                  root.confirmReset = false
+                  resetConfirmTimer.stop()
+                  root.runAction("userdict-reset")
+                }
               }
             }
           }
-        }
 
-        Text {
-          width: parent.width
-          text: root.notice
-          visible: root.notice !== ""
-          color: Color.accent
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+          // Shortcuts note
+          Text {
+            width: parent.width
+            text: "快捷键：Ctrl+Space 切换中英文 · Shift 临时英文 · Esc 取消输入"
+            color: Qt.darker(Color.foreground, 1.6)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          // Feedback toast / notice
+          Text {
+            width: parent.width
+            text: root.notice
+            visible: root.notice !== ""
+            color: root.confirmReset ? Color.urgent : Color.accent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            wrapMode: Text.WordWrap
+          }
         }
       }
     }
@@ -377,7 +556,7 @@ Item {
     interval: 5000
     onTriggered: {
       root.confirmReset = false
-      if (!root.busy) root.notice = ""
+      if (!root.busy && root.notice.indexOf("不可撤销") !== -1) root.notice = ""
     }
   }
 
@@ -396,7 +575,7 @@ Item {
           root.vertical = s.vertical === true
           root.correction = String(s.correction || "None")
           root.fuzzy = s.fuzzy || {}
-          root.contextInter = s.contextInter !== false
+          root.contextInter = s.contextInter === true
           root.userModelWeight = Number(s.userModelWeight ?? 20)
         } catch (e) {
           root.notice = "读取配置失败：" + e
@@ -410,9 +589,28 @@ Item {
     stdout: StdioCollector { waitForEnd: true }
     onExited: (code) => {
       if (setArgs.length === 3 && setArgs[1] === "action") {
-        root.notice = code === 0 ? (setArgs[2] === "userdict-reset" ? "用户词典已清空" : "主题已重新生成") : "操作失败（exit " + code + "）"
+        if (code === 0) {
+          switch (setArgs[2]) {
+            case "userdict-reset":
+              root.notice = "个人自学词库与词频记录已清空"
+              break
+            case "theme-regenerate":
+              root.notice = "主题已根据当前系统配色重新渲染"
+              break
+            case "fuzzy-clear":
+              root.notice = "已关闭全部模糊音"
+              break
+            case "fuzzy-preset-common":
+              root.notice = "已应用南方常用模糊音预设"
+              break
+            default:
+              root.notice = "操作完成"
+          }
+        } else {
+          root.notice = "操作失败（exit " + code + "）"
+        }
       } else {
-        root.notice = code === 0 ? "" : "写入失败（exit " + code + "）"
+        root.notice = code === 0 ? "" : "写入配置失败（exit " + code + "）"
       }
       root.busy = false
       root.refreshState()
