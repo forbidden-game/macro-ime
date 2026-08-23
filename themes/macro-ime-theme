@@ -6,7 +6,7 @@
 #
 #   palette  ~/.local/state/omarchy/current/theme/colors.toml
 #   radius   hyprctl getoption decoration:rounding   (sharp desktops stay sharp)
-#   font     fc-match monospace                      (same face as bar/menus)
+#   font     Maple Mono NF CN (fallback: fc-match monospace)
 #
 # The visual recipe mirrors omarchy-shell popups exactly:
 #   surface = background token · border = accent token · text = foreground token
@@ -21,7 +21,7 @@
 #   --theme NAME        source Omarchy theme (default: current)
 #   --out DIR           output theme dir (default ~/.local/share/fcitx5/themes/macro-ime)
 #   --radius N          override corner radius (default: hyprctl decoration:rounding)
-#   --font FAMILY       override font family (default: fc-match monospace)
+#   --font FAMILY       override font family (default: Maple Mono NF CN)
 #   --size PT           font size in points (default: 13)
 #   --border-width N    panel accent border width (default: 2, omarchy popup spec)
 #   --pill-alpha N      selected-candidate pill opacity % (default: 30)
@@ -129,7 +129,11 @@ PILL_RADIUS=$(( RADIUS > 12 ? 12 : RADIUS ))
 
 # ---------------------------------------------------------------------- font
 if [[ -z $FONT_FAMILY ]]; then
-  FONT_FAMILY=$(fc-match -f '%{family[0]}' monospace 2>/dev/null || echo sans-serif)
+  if fc-list :family | grep -qi "Maple Mono NF CN"; then
+    FONT_FAMILY="Maple Mono NF CN"
+  else
+    FONT_FAMILY=$(fc-match -f '%{family[0]}' monospace 2>/dev/null || echo sans-serif)
+  fi
 fi
 
 # -------------------------------------------------------------------- colors

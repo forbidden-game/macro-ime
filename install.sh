@@ -107,6 +107,12 @@ require_commands() {
     printf '  Install them, then re-run: %s\n' "$0" >&2
     exit 1
   fi
+
+  # Check for unified Chinese UI font: Maple Mono NF CN
+  if ! fc-list :family 2>/dev/null | grep -qi "Maple Mono NF CN"; then
+    printf '%s! macro-ime: recommended font "Maple Mono NF CN" is not installed.%s\n' "$C_B" "$C_0" >&2
+    printf '  For unified UI experience, install with: omarchy pkg add maplemono-nf-cn\n' >&2
+  fi
 }
 
 on_error() {

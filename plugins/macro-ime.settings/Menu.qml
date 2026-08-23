@@ -19,6 +19,7 @@ Item {
   property bool opened: false
 
   readonly property string configBin: Quickshell.env("HOME") + "/.local/share/macro-ime/bin/macro-ime-config"
+  readonly property string uiFontFamily: "Maple Mono NF CN, " + (Style.font && Style.font.family ? Style.font.family : "monospace")
 
   // ---- State model from macro-ime-config get-all --json
   property bool imActive: false
@@ -224,7 +225,7 @@ Item {
             Text {
               text: "Macro IME"
               color: Color.foreground
-              font.family: Style.font.family
+              font.family: root.uiFontFamily
               font.pixelSize: Style.font.title
               font.bold: true
               anchors.verticalCenter: parent.verticalCenter
@@ -249,7 +250,7 @@ Item {
               anchors.centerIn: parent
               text: root.notice
               color: root.showResetConfirm ? Color.urgent : Color.accent
-              font.family: Style.font.family
+              font.family: root.uiFontFamily
               font.pixelSize: Style.font.caption
               font.bold: true
             }
@@ -270,6 +271,7 @@ Item {
               text: "✕"
               color: Color.foreground
               opacity: closeMouse.containsMouse ? 1.0 : 0.6
+              font.family: root.uiFontFamily
               font.pixelSize: Style.font.bodySmall
               font.bold: true
             }
@@ -328,6 +330,7 @@ Item {
                 Text {
                   text: "候选词排列方向"
                   color: Color.foreground
+                  font.family: root.uiFontFamily
                   font.pixelSize: Style.font.body
                   anchors.verticalCenter: parent.verticalCenter
                 }
@@ -356,6 +359,7 @@ Item {
                       anchors.centerIn: parent
                       text: "横向排布"
                       color: !root.vertical ? Color.accent : Color.foreground
+                      font.family: root.uiFontFamily
                       font.bold: !root.vertical
                       font.pixelSize: Style.font.caption
                     }
@@ -381,6 +385,7 @@ Item {
                       anchors.centerIn: parent
                       text: "纵向列表"
                       color: root.vertical ? Color.accent : Color.foreground
+                      font.family: root.uiFontFamily
                       font.bold: root.vertical
                       font.pixelSize: Style.font.caption
                     }
@@ -442,6 +447,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "自适应学习权重"
                     color: Color.foreground
+                    font.family: root.uiFontFamily
                     font.pixelSize: Style.font.caption
                     font.bold: true
                   }
@@ -451,6 +457,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.currentWeightDesc()
                     color: Color.accent
+                    font.family: root.uiFontFamily
                     font.pixelSize: Style.font.caption
                   }
                 }
@@ -477,8 +484,9 @@ Item {
                         anchors.centerIn: parent
                         text: modelData.label
                         color: parent.active ? Color.accent : Color.foreground
+                        font.family: root.uiFontFamily
                         font.bold: parent.active
-                        font.pixelSize: 11
+                        font.pixelSize: Style.font.caption
                       }
                       MouseArea {
                         id: wmouse
@@ -513,7 +521,8 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   text: root.activeFuzzyCount === 0 ? "(未开启)" : "(已开启 " + root.activeFuzzyCount + " 项)"
                   color: root.activeFuzzyCount > 0 ? Color.accent : Qt.darker(Color.foreground, 1.5)
-                  font.pixelSize: 11
+                  font.family: root.uiFontFamily
+                  font.pixelSize: Style.font.caption
                 }
               }
 
@@ -584,6 +593,7 @@ Item {
                         Text {
                           text: fcatRow.modelData.name
                           color: (fcatRow.allOn || fcatRow.partialOn) ? Color.accent : Color.foreground
+                          font.family: root.uiFontFamily
                           font.bold: true
                           font.pixelSize: Style.font.bodySmall
                         }
@@ -591,7 +601,8 @@ Item {
                           visible: fcatRow.partialOn
                           text: "(" + fcatRow.activeCount + "/" + fcatRow.modelData.pairs.length + ")"
                           color: Color.accent
-                          font.pixelSize: 11
+                          font.family: root.uiFontFamily
+                          font.pixelSize: Style.font.caption
                           anchors.verticalCenter: parent.verticalCenter
                         }
                       }
@@ -599,7 +610,8 @@ Item {
                       Text {
                         text: fcatRow.modelData.desc
                         color: Qt.darker(Color.foreground, 1.4)
-                        font.pixelSize: 11
+                        font.family: root.uiFontFamily
+                        font.pixelSize: Style.font.caption
                       }
                     }
 
@@ -660,7 +672,8 @@ Item {
                     Text {
                       text: modelData.name + " 单项微调"
                       color: Qt.darker(Color.foreground, 1.5)
-                      font.pixelSize: 10
+                      font.family: root.uiFontFamily
+                      font.pixelSize: Style.font.caption
                       font.bold: true
                     }
 
@@ -687,8 +700,9 @@ Item {
                             anchors.centerIn: parent
                             text: modelData.label
                             color: fchip.on ? Color.accent : Color.foreground
+                            font.family: root.uiFontFamily
                             font.bold: fchip.on
-                            font.pixelSize: 11
+                            font.pixelSize: Style.font.caption
                           }
 
                           MouseArea {
@@ -757,6 +771,7 @@ Item {
                   width: parent.width
                   text: "⚠ 确认重置？将清空所有自学习词汇与个性化词频记录，且不可撤销。"
                   color: Color.urgent
+                  font.family: root.uiFontFamily
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.WordWrap
                 }

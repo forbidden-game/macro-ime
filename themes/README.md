@@ -17,7 +17,7 @@ truth and bakes them into a self-contained fcitx5 theme.
 | Labels (1. 2. 3.) | `foreground` @ 55%, 85% size |
 | Page arrows / menu glyphs | `foreground` @ 50% |
 | Corner radius | `hyprctl getoption decoration:rounding` — sharp desktops stay sharp |
-| Font | `fc-match monospace` — same face as bar & menus |
+| Font | `Maple Mono NF CN` (fallback: `fc-match monospace`) |
 
 Preedit is rendered **inside the panel** (`PreeditEnabledByDefault=False` in
 `~/.config/fcitx5/config`), so the ugly app-side preedit box never appears and
