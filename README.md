@@ -72,6 +72,9 @@ git clone https://github.com/forbidden-game/macro-ime.git && cd macro-ime
 ./install.sh
 ```
 
+如果目标机器无法访问 GitHub，请使用离线 bundle 中的 `install-offline.sh`。
+该脚本会先校验随包携带的语言模型，再调用同一套安装流程，不需要网络或本机编译工具链。
+
 可选参数：
 - `./install.sh --lm-file /path/to/zh_CN.lm`：使用本地已下载的语言模型。
 - `./install.sh --skip-lm`：仅安装 UI 与插件组件（跳过语言模型）。
