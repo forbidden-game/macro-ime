@@ -43,11 +43,14 @@ automatically (hook: `~/.config/omarchy/hooks/theme-set.d/macro-ime.sh`).
 ~/.local/share/macro-ime/themes/macro-ime-theme --theme gruvbox # from a named Omarchy theme
 macro-ime-theme --pill-alpha 40 --radius 8 --size 14          # knobs
 macro-ime-theme --selected accent                             # selected text in accent color
-macro-ime-theme --vertical                                    # vertical candidate list
+macro-ime-theme --vertical                                    # explicitly select vertical candidates
+macro-ime-theme --horizontal                                  # explicitly select horizontal candidates
 macro-ime-theme --dry-run                                     # print plan only
 ```
 
-All flags: see the header comment in `macro-ime-theme`.
+Without `--vertical` or `--horizontal`, regeneration preserves the user's
+current candidate-layout preference. All flags: see the header comment in
+`macro-ime-theme`.
 
 ## How it works
 

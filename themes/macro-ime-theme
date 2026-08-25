@@ -29,7 +29,9 @@
 #   --dim-alpha N       page arrows / menu glyphs opacity % (default: 50)
 #   --sep-alpha N       menu separator opacity % (default: 25)
 #   --selected MODE     selected text color: bright | accent | plain (default: bright)
-#   --vertical          also set Vertical Candidate List=True in classicui.conf
+#   --vertical          set Vertical Candidate List=True in classicui.conf
+#   --horizontal        set Vertical Candidate List=False in classicui.conf
+#                       (default: preserve the current preference)
 #   --size-factor N     LabelTextSizeFactor (default: 85)
 #   --no-ui-conf        don't touch classicui.conf
 #   --reload MODE       auto | reload | restart | none  (default: auto)
@@ -77,7 +79,8 @@ while [[ $# -gt 0 ]]; do
     --sep-alpha) SEP_ALPHA=$2; shift 2 ;;
     --selected) SELECTED=$2; shift 2 ;;
     --size-factor) SIZE_FACTOR=$2; shift 2 ;;
-    --vertical) VERTICAL=1; shift ;;
+    --vertical) VERTICAL=True; shift ;;
+    --horizontal) VERTICAL=False; shift ;;
     --no-ui-conf) NO_UI_CONF=1; shift ;;
     --reload) RELOAD=$2; shift 2 ;;
     --quiet|-q) QUIET=1; shift ;;
@@ -129,7 +132,7 @@ PILL_RADIUS=$(( RADIUS > 12 ? 12 : RADIUS ))
 
 # ---------------------------------------------------------------------- font
 if [[ -z $FONT_FAMILY ]]; then
-  if fc-list :family | grep -qi "Maple Mono NF CN"; then
+  if [[ $(fc-match -f '%{family[0]}' "Maple Mono NF CN" 2>/dev/null || true) == "Maple Mono NF CN" ]]; then
     FONT_FAMILY="Maple Mono NF CN"
   else
     FONT_FAMILY=$(fc-match -f '%{family[0]}' monospace 2>/dev/null || echo sans-serif)
@@ -215,14 +218,15 @@ make_font_desc() { echo "$FONT_FAMILY ${1:+$1 }$FONT_SIZE"; }
 TRAY_FONT_DESC="$FONT_FAMILY Bold $FONT_SIZE"
 
 conf_wants() { # does the conf file already carry every value we want?
-  local want_v; [[ -n $VERTICAL ]] && want_v=True || want_v=False
   [[ -f $UI_CONF ]] || return 1
   grep -q "^Theme=macro-ime$" "$UI_CONF" || return 1
   grep -q "^DarkTheme=macro-ime$" "$UI_CONF" || return 1
   grep -q "^UseDarkTheme=False$" "$UI_CONF" || return 1
   grep -q "^Font=$(make_font_desc "")$" "$UI_CONF" || return 1
   grep -q "^TrayOutlineColor=$BACKGROUND$" "$UI_CONF" || return 1
-  grep -qi "^Vertical Candidate List=$want_v$" "$UI_CONF" || return 1
+  if [[ -n $VERTICAL ]]; then
+    grep -qi "^Vertical Candidate List=$VERTICAL$" "$UI_CONF" || return 1
+  fi
   return 0
 }
 
@@ -240,8 +244,7 @@ apply_ui_conf() {
     "TrayOutlineColor=$BACKGROUND"
     "TrayTextColor=$FOREGROUND"
   )
-  [[ -n $VERTICAL ]] && v=True || v=False
-  keys+=("Vertical Candidate List=$v")
+  [[ -n $VERTICAL ]] && keys+=("Vertical Candidate List=$VERTICAL")
   tmp=$(mktemp)
   cp "$UI_CONF" "$tmp" 2>/dev/null || : >"$tmp"
   for kv in "${keys[@]}"; do

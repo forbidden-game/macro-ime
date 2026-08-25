@@ -322,22 +322,18 @@ Item {
               border.width: 1
               border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.08)
 
-              Row {
+              Item {
                 anchors.fill: parent
                 anchors.leftMargin: Style.space(12)
                 anchors.rightMargin: Style.space(8)
 
                 Text {
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
                   text: "候选词排列方向"
                   color: Color.foreground
                   font.family: root.uiFontFamily
                   font.pixelSize: Style.font.body
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Item {
-                  width: parent.width - 120 - 170
-                  height: 1
                 }
 
                 Row {
@@ -579,18 +575,20 @@ Item {
                     ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.3)
                     : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.08)
 
-                  Row {
+                  Item {
                     anchors.fill: parent
                     anchors.leftMargin: Style.space(12)
                     anchors.rightMargin: Style.space(12)
 
                     Column {
+                      anchors.left: parent.left
                       anchors.verticalCenter: parent.verticalCenter
                       spacing: 2
 
                       Row {
                         spacing: Style.space(6)
                         Text {
+                          id: fcatName
                           text: fcatRow.modelData.name
                           color: (fcatRow.allOn || fcatRow.partialOn) ? Color.accent : Color.foreground
                           font.family: root.uiFontFamily
@@ -603,7 +601,8 @@ Item {
                           color: Color.accent
                           font.family: root.uiFontFamily
                           font.pixelSize: Style.font.caption
-                          anchors.verticalCenter: parent.verticalCenter
+                          height: fcatName.implicitHeight
+                          verticalAlignment: Text.AlignVCenter
                         }
                       }
 
@@ -613,12 +612,6 @@ Item {
                         font.family: root.uiFontFamily
                         font.pixelSize: Style.font.caption
                       }
-                    }
-
-                    Item {
-                      width: 1
-                      height: 1
-                      anchors.verticalCenter: parent.verticalCenter
                     }
 
                     ToggleSwitch {

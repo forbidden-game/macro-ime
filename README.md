@@ -63,7 +63,9 @@ Macro IME 是专为 Omarchy 及 Wayland 桌面打造的现代中文输入解决�
 
 ## 安装与卸载
 
-安装器采用非侵入设计，所有文件安装在用户目录（`~/.local/share/macro-ime/`），通过 systemd user drop-in（`LIBIME_MODEL_DIRS`）加载模型，**无需 root 权限，不修改任何 `/usr` 系统文件**。
+安装器采用非侵入设计，所有文件安装在用户目录（`~/.local/share/macro-ime/`），通过 systemd user drop-in（`LIBIME_MODEL_DIRS`）加载模型，**无需 root 权限，不修改任何 `/usr` 系统文件**。默认安装从公开 GitHub Release 下载固定版本的语言模型并校验 SHA-256，无需 GitHub 登录。
+
+当前正式支持已完成系统更新的 **Omarchy 4.x / x86-64 / Fcitx Core ABI 7**。安装器会在写入用户配置前检查平台和预编译 addon 的 ABI；不兼容时直接退出。
 
 ```bash
 git clone https://github.com/forbidden-game/macro-ime.git && cd macro-ime
@@ -74,6 +76,7 @@ git clone https://github.com/forbidden-game/macro-ime.git && cd macro-ime
 - `./install.sh --lm-file /path/to/zh_CN.lm`：使用本地已下载的语言模型。
 - `./install.sh --skip-lm`：仅安装 UI 与插件组件（跳过语言模型）。
 - `./install.sh --offline`：离线模式（本地缺少模型时直接退出）。
+- `./install.sh --build-from-source`：开发者选项，在本机编译 Fcitx addon。
 - `./install.sh --undo`：完整卸载并还原历史配置。
 
 > 快捷键、模糊音、纠错算法及横竖排布局等所有配置项均可在托盘/顶栏指示器的设置面板中直接调整。
@@ -118,6 +121,6 @@ flowchart TD
 
 ## License 与致谢
 
-- 核心代码遵循 MIT 许可证。
+- 核心代码遵循 [MIT 许可证](LICENSE)。
 - 感谢 [fcitx5](https://github.com/fcitx/fcitx5) 与 [libime](https://github.com/fcitx/libime) 提供的输入框架与解码算法支持。
 - 语料与词库数据遵循各自原始开源及科研授权协议。

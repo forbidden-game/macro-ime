@@ -4,6 +4,8 @@
 
 - **不修改系统文件**：所有 Macro IME 组件安装在用户目录下 (`~/.local/share/macro-ime/`)
 - **不需要 root**：LM 通过 `LIBIME_MODEL_DIRS` 环境变量注入，不覆盖 `/usr/lib/libime/`
+- **开箱即用**：公开 Release + `curl` 下载固定模型资产，不需要 GitHub 登录
+- **明确支持面**：Omarchy 4.x / x86-64 / Fcitx Core ABI 7
 - **可完整回滚**：`install.sh --undo` 恢复所有修改
 
 ## 文件布局
@@ -33,6 +35,10 @@
 └── macro-ime-state.conf        # systemd drop-in:
                               #   FCITX_ADDON_DIRS → 加载 addon
                               #   LIBIME_MODEL_DIRS → 加载 LM
+
+~/.cache/macro-ime/v0.1.1/
+├── zh_CN.lm                  # 已校验的公开下载缓存
+└── zh_CN.lm.predict
 ```
 
 ## LM 加载机制
@@ -56,38 +62,32 @@ fcitx5 启动后，pinyin addon 在 `~/.local/share/macro-ime/lib/` 找到
 ### 首次安装
 
 ```bash
-gh auth login            # 一次性：私有 repo 下载 LM 需要认证
 git clone https://github.com/forbidden-game/macro-ime.git
 cd macro-ime
 ./install.sh
 ```
 
 install.sh 自动：
-1. 检查依赖 (fcitx5 + pinyin addon, omarchy, omarchy-shell, jq/busctl/hyprctl；
-   预编译 addon 在 repo 里时无需编译工具链)
-2. 解析 LM：自动定位最新带 `zh_CN.lm` 资产的 release
-   （sha256 fail-closed 校验）/ dist/ / --lm-file，
+1. 检查 Omarchy 4.x、x86-64、所需公开命令和 systemd user unit
+2. 用 `ldd -r` 在任何配置写入前验证预编译 addon 的 Fcitx ABI
+3. 解析 LM：固定到公开的模型 release（内置 URL + SHA-256）/
+   已校验缓存 / dist/ / --lm-file，
    并依据 model-manifest.json 判定是否已安装且一致
-3. 安装预编译 addon（含 ldd -r ABI 预检；失败回退本地 cmake 编译）
-4. 安装主题 + 插件 + 配置后端（插件安装前备份既有目录）
-5. 事务提交：stop fcitx5 → 备份/编辑配置 + 写入 LM + manifest
+4. 安装预编译 addon；普通用户无需编译工具链
+5. 安装主题 + 插件 + 配置后端（插件安装前备份既有目录）
+6. 事务提交：stop fcitx5 → 备份/编辑配置 + 写入 LM + manifest
    → restart fcitx5（失败时自动恢复服务）
-6. 应用主题 + 激活插件 + 重启 shell，并通过**健康检查**：
+7. 应用主题 + 激活插件 + 重启 shell，并通过**健康检查**：
    服务 active → addon 已加载 → state 文件实时写入
 
 ### 离线安装
 
-repo 是私有的，裸 `curl` 会 404——用 `gh`（自动带认证）下载：
-
 ```bash
-# 在有网络的机器上 (需 gh auth login)—— 从持有 LM 的 release 下载
-# （LM 不随每个版本重复上传；这条命令与 install.sh 的解析逻辑一致）
-LM_TAG=$(gh api repos/forbidden-game/macro-ime/releases --paginate \
-  --jq '.[] | select(any(.assets[]?; .name == "zh_CN.lm")) | .tag_name' | head -1)
-gh release download "$LM_TAG" --repo forbidden-game/macro-ime \
-  --pattern 'zh_CN.lm' --pattern 'zh_CN.lm.predict' --dir /tmp/macro-ime-lm
+# 在有网络的机器上，无需 GitHub 登录
+curl -fLO https://github.com/forbidden-game/macro-ime/releases/download/v0.1.1/zh_CN.lm
+curl -fLO https://github.com/forbidden-game/macro-ime/releases/download/v0.1.1/zh_CN.lm.predict
 
-# 在目标机器上 (U 盘/内网传输 /tmp/macro-ime-lm/)
+# 在目标机器上（U 盘/内网传输）
 ./install.sh --lm-file /path/to/zh_CN.lm
 # 或放到 repo 的 dist/ 目录
 cp zh_CN.lm zh_CN.lm.predict dist/
@@ -114,15 +114,15 @@ cloud-pinyin 预测（安装会给出 warning）。
 
 ## 语言模型更新
 
-**LM 资产不随每个 release 重复上传**：install.sh 自动解析“最新一个
-带 `zh_CN.lm` 资产的 release”作为模型源（`resolve_lm_release`），
-模型字节没变就永远从原 release 拉取，发版无需重新上传 463MB。
+**LM 资产不随每个 release 重复上传**：install.sh 明确固定模型所属的
+release、公开下载 URL 和 SHA-256。模型没变化时继续引用原 release；
+模型变化时更新安装器中的 `MODEL_RELEASE` 和两个 digest。
 
 LM 由 `~/.local/share/macro-ime/lib/model-manifest.json` 跟踪：
 
 ```json
 {
-  "release": "v0.1.1",     // 实际持有该模型的 release（解析结果）
+  "release": "v0.1.1",     // 安装器固定的公开模型 release
   "source": "release",     // release | lm-file | dist
   "files": {
     "zh_CN.lm": {"sha256": "…", "bytes": 463166204},
@@ -136,12 +136,14 @@ LM 由 `~/.local/share/macro-ime/lib/model-manifest.json` 跟踪：
 1. 训练新模型 (kenlm → ARPA → `libime_slm_build_binary`)
 2. 生成预测索引 (`libime_prediction`)
 3. 上传到**新 release**（`gh release upload <新tag> zh_CN.lm zh_CN.lm.predict`）
-4. 用户重新运行 `install.sh` → 解析到新 release，digest 与 manifest
-   不一致 → 自动下载并原子替换旧 LM
+4. 更新 `install.sh` 中的 `MODEL_RELEASE`、`LM_SHA256` 和
+   `LM_PREDICT_SHA256`
+5. 用户重新运行 `install.sh` → 固定版本/digest 与 manifest
+   不一致 → 自动下载并替换旧 LM
 
-已有 LM 只在 `manifest.release == 解析出的 LM release` 且 sha256 全部
-匹配时才跳过。旧安装（无 manifest）会先比对已有文件与当前 LM release
-的 digest，一致则只补写 manifest（无需重下 463MB）。
+已有 LM 只在 `manifest.release == MODEL_RELEASE` 且文件与安装器内置
+SHA-256 全部匹配时才跳过。旧安装（无 manifest）会先比对已有文件，
+一致则只补写 manifest（无需重下 463MB）。
 
 ## CI / 发布
 
@@ -150,6 +152,9 @@ LM 由 `~/.local/share/macro-ime/lib/model-manifest.json` 跟踪：
 - 校验 `dist/libmacro-ime-state.so`：x86-64 ELF、NEEDED 依赖集合
   (libFcitx5Core.so.7 / Config.so.6 / Utils.so.2)、**与源码同步**
   （聚合 hash sidecar：cpp + CMakeLists + conf.in）
+- 在 Arch Linux 构建环境中重新编译 release addon，并验证 Fcitx Core
+  ABI 仍为 7；ABI 变化会让 CI fail-closed
+- 通过 GitHub 公共 API 核对模型资产 digest 与安装器固定值
 - `bash -n` + `shellcheck`（install.sh / macro-ime-config / macro-ime-theme / hook）
 - install.sh 可执行 smoke test（--help、非法参数拒绝、函数先定义回归）
 
@@ -165,18 +170,16 @@ sha256sum engine/macro-ime-state/macro-ime-state.cpp \
           engine/macro-ime-state/macro-ime-state.conf.in \
   | sha256sum | cut -d' ' -f1 > dist/libmacro-ime-state.so.src
 
-# 2. 升级 VERSION 文件 (决定 install.sh 拉取哪个 release 的 LM/addon，
-#    也驱动用户的模型更新)
-echo "0.1.1" > VERSION
+# 2. 升级 VERSION 文件（应用版本；模型版本由 install.sh 单独固定）
+echo "X.Y.Z" > VERSION
 
-# 3. 提交 + 打 tag (CI 验证通过后自动创建 DRAFT release, 附 .so)
+# 3. 提交 + 打 tag（CI 在 Arch 环境重编译并附上正确命名的 .so）
 git add -A && git commit -m "release: vX.Y.Z"
 git tag vX.Y.Z && git push origin main vX.Y.Z
 
-# 4. LM 资产：仅当模型内容变化时才上传（install.sh 自动解析最新
-#    带 zh_CN.lm 的 release，未变化时无需重复上传 463MB）
+# 4. LM 资产：仅当模型内容变化时才上传
 gh release upload vX.Y.Z zh_CN.lm zh_CN.lm.predict --repo forbidden-game/macro-ime
-#    （模型没变 → 跳过此步）
+#    然后更新 install.sh 中固定的 MODEL_RELEASE 和 SHA-256
 
 # 5. 取消 draft (CI 建的是 draft, 防止未验证 tag 直接发布)
 #    注意: REST API 按 tag 查询不到 draft (404), 必须用数字 id:
@@ -185,10 +188,9 @@ NUM_ID=$(gh api repos/forbidden-game/macro-ime/releases \
 gh api repos/forbidden-game/macro-ime/releases/$NUM_ID -X PATCH -f draft=false
 ```
 
-用户侧更新：`git pull && ./install.sh`——install.sh 解析最新带
-`zh_CN.lm` 的 release 作为模型源，sha256 **fail-closed** 校验（拿不到
-digest 即失败，不降级为跳过），然后写入 manifest。已安装且
-manifest 与该 release 一致的 LM 会跳过。
+用户侧更新：`git pull && ./install.sh`。安装器按固定公开 URL 下载，
+使用内置 SHA-256 **fail-closed** 校验，然后写入 manifest。已安装且
+manifest 与固定模型 release 一致的 LM 会跳过。
 
 ## 依赖声明
 
@@ -202,9 +204,11 @@ manifest 与该 release 一致的 LM 会跳过。
 | omarchy / omarchy-shell | `command -v` | 插件与 CLI |
 | jq / busctl | `command -v` | 设置面板后端 |
 | hyprctl / fc-match | `command -v` | 主题生成器 |
+| curl | 按需检查 | 公开模型下载 |
 | systemd --user | — | fcitx5 service + drop-in |
 
-构建时 (仅 fallback 本地编译):
+构建时（仅显式 `--build-from-source` 开发模式）：
+
 | 依赖 | 用途 |
 |---|---|
 | cmake >= 3.20 | 构建 addon |

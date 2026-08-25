@@ -93,7 +93,8 @@ jobs:
           bash -c 'source /tmp/defs.sh
           for f in require_commands on_error service_running stop_fcitx restart_fcitx \
                    restore_file backup_file_once restore_plugin_dir undo load_version \
-                   gh_release_digest resolve_lm_release assert_sha256 check_lm_size \
+                   preflight_platform prepare_addon_artifact assert_sha256 check_lm_size \
+                   download_public_asset \
                    prepare_language_model commit_language_model write_manifest \
                    install_addon build_state_addon_to install_runtime install_plugins \
                    prepare_fcitx_config commit_fcitx_config health_check apply_and_activate; do
@@ -101,20 +102,75 @@ jobs:
           done'
           echo "OK: all step functions defined before main"
 
+      - name: Verify public model contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          model_release=$(sed -n 's/^MODEL_RELEASE="\([^"]*\)"/\1/p' install.sh)
+          lm_sha=$(sed -n 's/^LM_SHA256="\([^"]*\)"/\1/p' install.sh)
+          predict_sha=$(sed -n 's/^LM_PREDICT_SHA256="\([^"]*\)"/\1/p' install.sh)
+          release=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/forbidden-game/macro-ime/releases/tags/$model_release")
+          actual_lm=$(jq -r '.assets[] | select(.name == "zh_CN.lm") | .digest | sub("^sha256:"; "")' <<<"$release")
+          actual_predict=$(jq -r '.assets[] | select(.name == "zh_CN.lm.predict") | .digest | sub("^sha256:"; "")' <<<"$release")
+          test "$actual_lm" = "$lm_sha"
+          test "$actual_predict" = "$predict_sha"
+          echo "OK: pinned public model assets and installer digests agree"
+
+  build-addon:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release addon against current Arch Fcitx
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            archlinux:base-devel bash -lc '
+              pacman -Syu --noconfirm cmake fcitx5
+              cmake -S engine/macro-ime-state -B build-ci -DCMAKE_BUILD_TYPE=Release
+              cmake --build build-ci --parallel
+              pacman -Q fcitx5 glibc gcc-libs
+            '
+
+      - name: Verify generated addon ABI
+        run: |
+          file build-ci/libmacro-ime-state.so
+          readelf -h build-ci/libmacro-ime-state.so | grep -q "X86-64"
+          needed=$(readelf -d build-ci/libmacro-ime-state.so | grep NEEDED)
+          for lib in libFcitx5Core.so.7 libFcitx5Config.so.6 libFcitx5Utils.so.2; do
+            echo "$needed" | grep -q "$lib" || {
+              echo "ERROR: current Arch Fcitx ABI changed; missing $lib"
+              exit 1
+            }
+          done
+          echo "OK: release addon targets x86-64 / Fcitx Core ABI 7"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macro-ime-addon-linux-x86_64-fcitx5core7
+          path: build-ci/libmacro-ime-state.so
+          if-no-files-found: error
+
   # Release: triggered by git tag (e.g. v1.0.0)
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: verify
+    needs: [verify, build-addon]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: macro-ime-addon-linux-x86_64-fcitx5core7
+          path: release-dist
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/libmacro-ime-state.so
+          files: release-dist/libmacro-ime-state.so
           draft: true
           generate_release_notes: true
         env:

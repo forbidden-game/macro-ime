@@ -6,11 +6,12 @@
 #
 # Options:
 #   --lm-file <path>   path to zh_CN.lm (E6 language model, ~463MB).
-#                      If not provided, downloads from the newest release
-#                      that carries the model (not per-version re-uploads:
-#                      unchanged models stay on their original release).
+#                      If not provided, downloads the pinned public model
+#                      release with curl and verifies its fixed SHA-256.
 #   --skip-lm          skip LM install (UI only, no engine model).
 #   --offline          do not download; fail if the LM is missing locally.
+#   --build-from-source
+#                      developer fallback: compile the Fcitx addon locally.
 #
 # All files go under user directories — no root, no /usr modification.
 # The LM is loaded via the LIBIME_MODEL_DIRS env var (systemd drop-in),
@@ -25,9 +26,10 @@
 #
 # Installed-model tracking: ~/.local/share/macro-ime/lib/model-manifest.json
 # records the release + sha256 of the installed LM. Reinstalls skip only when
-# the manifest matches the pinned release *and* the files verify; a VERSION
-# bump therefore really updates the model.
+# the manifest matches the pinned model release and the files verify against
+# installer-owned digests.
 set -Eeuo pipefail
+export MISE_QUIET=1 MISE_SILENT=1
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MACRO_IME_HOME="${HOME}/.local/share/macro-ime"
@@ -46,10 +48,19 @@ GH_REPO="forbidden-game/macro-ime"
 
 LM_FILENAME="zh_CN.lm"
 LM_PREDICT_FILENAME="zh_CN.lm.predict"
+MODEL_RELEASE="v0.1.1"
+MODEL_BASE_URL="https://github.com/${GH_REPO}/releases/download/${MODEL_RELEASE}"
+LM_SHA256="db220323580ea69aa8efce1b6e5752db6ae847b3e13f65a22195b37d9f710132"
+LM_PREDICT_SHA256="087c3d65016a633fcd61e302a4c7724948b669f34cb5d3448da1b822b7370d7c"
+MODEL_CACHE_ROOT="${XDG_CACHE_HOME:-${HOME}/.cache}/macro-ime"
+MODEL_CACHE_DIR="${MODEL_CACHE_ROOT}/${MODEL_RELEASE}"
 
-# Pinned engine-assets release (keeps UI-from-git and .so/.lm in sync).
-# Resolved in load_version() (called from main) so the definition section of
-# this script stays side-effect-free.
+SUPPORTED_ARCH="x86_64"
+SUPPORTED_OMARCHY_MAJOR="4"
+PREBUILT_ADDON="${SRC}/dist/libmacro-ime-state.so"
+
+# Application release version. The large language model is versioned
+# independently by MODEL_RELEASE and its fixed digests above.
 VERSION=""
 RELEASE_TAG=""
 
@@ -57,11 +68,13 @@ RELEASE_TAG=""
 LM_FILE=""
 SKIP_LM=0
 OFFLINE=0
+BUILD_FROM_SOURCE=0
 while [[ $# -gt 0 ]]; do
   case $1 in
     --lm-file)  LM_FILE="${2:?--lm-file requires a path}"; shift 2 ;;
     --skip-lm)  SKIP_LM=1; shift ;;
     --offline)  OFFLINE=1; shift ;;
+    --build-from-source) BUILD_FROM_SOURCE=1; shift ;;
     --undo)     break ;;   # handled in main
     -h|--help)  awk 'NR>1 { if ($0 ~ /^#/) { sub(/^# ?/,""); print } else if (NF) exit }' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 1 ;;
@@ -80,20 +93,23 @@ ok()   { printf '%s    \u2713 %s%s\n' "$C_G" "$1" "$C_0"; }
 FCITX_NEED_RESTART=0
 # Re-entry guard for on_error (bash fires ERR twice for failures in $(...)).
 ERROR_HANDLED=0
+ADDON_SRC="$PREBUILT_ADDON"
+ADDON_BUILD_DIR=""
 
 # --- functions (all defined before use) --------------------------------------
 
 require_commands() {
   local missing=() c
-  for c in omarchy omarchy-shell systemctl fcitx5 fcitx5-remote jq busctl hyprctl fc-match; do
+  for c in omarchy omarchy-shell systemctl fcitx5 fcitx5-remote jq busctl hyprctl fc-match ldd; do
     command -v "$c" >/dev/null || missing+=("$c")
   done
   # fcitx5-chinese-addons ships the pinyin engine that Macro IME builds on.
   # Without it the LM would never be used.
   [[ -f /usr/share/fcitx5/addon/pinyin.conf ]] || \
     missing+=("fcitx5-chinese-addons (pinyin addon) — install with: omarchy pkg add fcitx5-chinese-addons")
-  # Build tools only when we actually have to compile the addon from source.
-  if [[ ! -f "${SRC}/dist/libmacro-ime-state.so" ]]; then
+  # Local compilation is an explicit developer fallback, never a normal
+  # end-user dependency.
+  if (( BUILD_FROM_SOURCE )); then
     for c in pkg-config cmake c++; do
       command -v "$c" >/dev/null || \
         missing+=("$c (to build the addon; or provide dist/libmacro-ime-state.so)")
@@ -109,7 +125,7 @@ require_commands() {
   fi
 
   # Check for unified Chinese UI font: Maple Mono NF CN
-  if ! fc-list :family 2>/dev/null | grep -qi "Maple Mono NF CN"; then
+  if [[ $(fc-match -f '%{family[0]}' "Maple Mono NF CN" 2>/dev/null || true) != "Maple Mono NF CN" ]]; then
     printf '%s! macro-ime: recommended font "Maple Mono NF CN" is not installed.%s\n' "$C_B" "$C_0" >&2
     printf '  For unified UI experience, install with: omarchy pkg add maplemono-nf-cn\n' >&2
   fi
@@ -144,7 +160,7 @@ on_error() {
   fi
   printf '  A partial install may remain on this machine. Roll everything back with:\n' >&2
   printf '      %s --undo\n' "$0" >&2
-  [[ -n "$LM_DL_DIR" ]] && rm -rf "$LM_DL_DIR"
+  [[ -n "$ADDON_BUILD_DIR" ]] && rm -rf "$ADDON_BUILD_DIR"
   exit "$code"
 }
 
@@ -224,8 +240,6 @@ undo() {
   step 3 3 "Removing installed files + restoring pre-install plugin state"
   omarchy plugin disable macro-ime.indicator >/dev/null 2>&1 || true
   omarchy plugin disable macro-ime.settings >/dev/null 2>&1 || true
-  omarchy plugin disable omarime.indicator >/dev/null 2>&1 || true
-  omarchy plugin disable omarime.settings >/dev/null 2>&1 || true
   restore_plugin_dir macro-ime.indicator
   restore_plugin_dir macro-ime.settings
   # Restore enable state recorded before install (placement is not recorded
@@ -241,13 +255,10 @@ undo() {
     fi
   fi
   rm -rf "$MACRO_IME_HOME" \
-         "$HOME/.local/share/omarime" \
+         "$MODEL_CACHE_ROOT" \
          "$HOME/.local/share/fcitx5/themes/macro-ime" \
-         "$HOME/.local/share/fcitx5/themes/omarime" \
          "$HOME/.config/omarchy/hooks/theme-set.d/macro-ime.sh" \
-         "$HOME/.config/omarchy/hooks/theme-set.d/omarime.sh" \
-         "$RUNTIME_STATE_DIR" \
-         "${XDG_RUNTIME_DIR:-/run/user/${UID}}/omarime"
+         "$RUNTIME_STATE_DIR"
   systemctl --user daemon-reload
   restart_fcitx
   ok "removed; fcitx5 config restored to its pre-install state"
@@ -263,32 +274,78 @@ load_version() {
   RELEASE_TAG="v${VERSION}"
 }
 
-# sha256 of a release asset, from GitHub's recorded digest. Empty on failure.
-gh_release_digest() {
-  local name=$1 release=$2
-  gh api "repos/${GH_REPO}/releases/tags/${release}" \
-    --jq ".assets[] | select(.name == \"${name}\") | .digest // \"\" | sub(\"^sha256:\"; \"\")" \
-    2>/dev/null || true
+preflight_platform() {
+  local arch omarchy_version
+
+  arch=$(uname -m)
+  if [[ "$arch" != "$SUPPORTED_ARCH" ]]; then
+    echo "macro-ime: unsupported architecture: ${arch}" >&2
+    echo "  Supported release target: Omarchy 4.x on ${SUPPORTED_ARCH}." >&2
+    return 1
+  fi
+
+  omarchy_version=$(omarchy version 2>/dev/null | tail -1)
+  if [[ ! "$omarchy_version" =~ ^${SUPPORTED_OMARCHY_MAJOR}\. ]]; then
+    echo "macro-ime: unsupported Omarchy version: ${omarchy_version:-unknown}" >&2
+    echo "  Supported release target: Omarchy ${SUPPORTED_OMARCHY_MAJOR}.x." >&2
+    return 1
+  fi
+
+  # Check the public commands this installer relies on instead of assuming
+  # every Omarchy 4.x build exposes the same shell integration.
+  if ! omarchy plugin validate --help >/dev/null 2>&1 ||
+     ! omarchy plugin enable --help >/dev/null 2>&1 ||
+     ! omarchy hook install --help >/dev/null 2>&1 ||
+     ! omarchy restart shell --help >/dev/null 2>&1; then
+    echo "macro-ime: this Omarchy 4.x build lacks a required plugin or hook command." >&2
+    echo "  Run 'omarchy update', then retry." >&2
+    return 1
+  fi
+  if ! systemctl --user cat omarchy-fcitx5.service >/dev/null 2>&1; then
+    echo "macro-ime: omarchy-fcitx5.service is unavailable." >&2
+    echo "  Run 'omarchy update', then retry from a graphical session." >&2
+    return 1
+  fi
+
+  ok "platform supported (${omarchy_version}, ${arch})"
 }
 
-# The newest release that actually carries the LM assets. The LM bytes
-# rarely change, and unchanged models are never re-uploaded per release —
-# installs resolve the owning release implicitly. A model update therefore
-# means: upload the new zh_CN.lm to the new release, and installs pick it
-# up automatically (digest differs from the manifest).
-resolve_lm_release() {
-  gh api "repos/${GH_REPO}/releases" --paginate \
-    --jq '.[] | select(any(.assets[]?; .name == "zh_CN.lm")) | .tag_name' \
-    2>/dev/null | head -1
+prepare_addon_artifact() {
+  local ldd_output bad
+
+  if (( BUILD_FROM_SOURCE )); then
+    ADDON_BUILD_DIR=$(mktemp -d)
+    ADDON_SRC="${ADDON_BUILD_DIR}/libmacro-ime-state.so"
+    note "developer mode: building addon against this machine's Fcitx ABI"
+    build_state_addon_to "$ADDON_SRC"
+  elif [[ ! -f "$ADDON_SRC" ]]; then
+    echo "macro-ime: release is missing ${ADDON_SRC}." >&2
+    echo "  Download a complete release or use --build-from-source for development." >&2
+    return 1
+  fi
+
+  if ! ldd_output=$(ldd -r "$ADDON_SRC" 2>&1); then
+    echo "macro-ime: cannot inspect the pre-built addon:" >&2
+    printf '%s\n' "$ldd_output" >&2
+    return 1
+  fi
+  bad=$(grep -E "not found|undefined symbol" <<<"$ldd_output" || true)
+  if [[ -n "$bad" ]]; then
+    echo "macro-ime: the pre-built addon is incompatible with this Fcitx ABI:" >&2
+    printf '%s\n' "$bad" >&2
+    echo "  Run 'omarchy update' and retry. Developers may use --build-from-source." >&2
+    return 1
+  fi
+
+  ok "addon resolves against the local Fcitx runtime (${SUPPORTED_ARCH})"
 }
 
-# Strict sha256 check — fail-closed: an unavailable digest is an error, not a
-# pass. Used for downloads from the pinned release.
+# Strict sha256 check — fail-closed: an unavailable digest is an error.
 assert_sha256() {
   local file=$1 expected=$2 label=$3
   local actual
   if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
-    echo "macro-ime: no sha256 digest available for ${label} (release ${LM_RELEASE:-unknown} API?)" >&2
+    echo "macro-ime: invalid installer-owned sha256 for ${label}" >&2
     return 1
   fi
   actual=$(sha256sum "$file" | cut -d' ' -f1)
@@ -317,80 +374,91 @@ check_lm_size() {
 LM_SRC=""
 LM_PREDICT_SRC=""
 LM_SOURCE=""          # release | lm-file | dist
-LM_RELEASE=""         # newest release carrying zh_CN.lm (source of truth)
-LM_DL_DIR=""          # temp download dir, kept until commit copies the files
+LM_RELEASE=""         # pinned public release for verified release assets
 commit_manifest_only=0  # 1 = files already match this release; just write the manifest
 
+download_public_asset() {
+  local name=$1 expected=$2
+  local destination="${MODEL_CACHE_DIR}/${name}"
+  local partial="${destination}.part"
+  local resume=()
+
+  mkdir -p "$MODEL_CACHE_DIR"
+  if [[ -f "$destination" ]]; then
+    if assert_sha256 "$destination" "$expected" "$name"; then
+      note "using verified download cache: $name" >&2
+      printf '%s\n' "$destination"
+      return 0
+    fi
+    rm -f "$destination"
+  fi
+
+  command -v curl >/dev/null || {
+    echo "macro-ime: curl is required for the public model download." >&2
+    return 1
+  }
+  [[ -f "$partial" ]] && resume=(--continue-at -)
+  note "downloading ${name} from public release ${MODEL_RELEASE}" >&2
+  if ! curl --fail --location --show-error --progress-bar \
+      --retry 5 --retry-all-errors --connect-timeout 15 \
+      "${resume[@]}" --output "$partial" "${MODEL_BASE_URL}/${name}"; then
+    echo "macro-ime: public download failed: ${MODEL_BASE_URL}/${name}" >&2
+    return 1
+  fi
+  if ! assert_sha256 "$partial" "$expected" "$name"; then
+    rm -f "$partial"
+    return 1
+  fi
+  mv "$partial" "$destination"
+  printf '%s\n' "$destination"
+}
+
 prepare_language_model() {
+  local lm_dest="${MACRO_IME_LM_DIR}/${LM_FILENAME}"
+  local predict_dest="${MACRO_IME_LM_DIR}/${LM_PREDICT_FILENAME}"
+  local cache_lm="${MODEL_CACHE_DIR}/${LM_FILENAME}"
+  local cache_predict="${MODEL_CACHE_DIR}/${LM_PREDICT_FILENAME}"
+
   if (( SKIP_LM )); then
     note "skipped (--skip-lm)"
     ok "language model skipped"
     return 0
   fi
 
-  # Newest release carrying zh_CN.lm — the source of truth for "current"
-  # model bytes. Never resolved in --offline mode (no network at all) or
-  # when an explicit --lm-file was given (no release involvement).
-  LM_RELEASE=""
-  if (( ! OFFLINE )) && [[ -z "$LM_FILE" ]]; then
-    LM_RELEASE="$(resolve_lm_release)"
-  fi
-  if [[ -z "$LM_RELEASE" ]]; then
-    note "(no LM release resolution — offline or gh unavailable)"
-  else
-    note "LM assets resolved from release ${LM_RELEASE}"
-  fi
+  LM_RELEASE="$MODEL_RELEASE"
 
-  local lm_dest="${MACRO_IME_LM_DIR}/${LM_FILENAME}"
-  local predict_dest="${MACRO_IME_LM_DIR}/${LM_PREDICT_FILENAME}"
-
-  # --- 1. Already installed and verified against the current LM release?
+  # --- 1. Already installed and verified against the pinned public release?
   #        (--lm-file always bypasses this: an explicit file wins.)
   if [[ -z "$LM_FILE" && -f "$MANIFEST" && -f "$lm_dest" ]]; then
-    local mrel msrc lmh prh
+    local mrel msrc
     mrel=$(jq -r '.release // ""' "$MANIFEST" 2>/dev/null || true)
     msrc=$(jq -r '.source // ""' "$MANIFEST" 2>/dev/null || true)
-    lmh=$(jq -r '.files["zh_CN.lm"].sha256 // ""' "$MANIFEST" 2>/dev/null || true)
-    prh=$(jq -r '.files["zh_CN.lm.predict"].sha256 // ""' "$MANIFEST" 2>/dev/null || true)
-    if [[ "$msrc" == "release" && \
-          "$lmh" == "$(sha256sum "$lm_dest" | cut -d' ' -f1)" && \
-          -f "$predict_dest" && "$prh" == "$(sha256sum "$predict_dest" | cut -d' ' -f1)" ]]; then
-      if [[ -n "$LM_RELEASE" ]]; then
-        # Online: skip only when the manifest tracks the current LM release.
-        if [[ "$mrel" == "$LM_RELEASE" ]]; then
-          note "LM already installed and verified (release ${LM_RELEASE})"
-          ok "language model in place"
-          return 0
-        fi
-        note "newer model available (release ${LM_RELEASE}, installed ${mrel}); updating"
-      elif (( OFFLINE )); then
-        # Offline: can't check for updates — trust the local manifest.
-        note "LM already installed and manifest-verified; offline, skipping"
+    if [[ "$msrc" == "release" && "$mrel" == "$MODEL_RELEASE" && \
+          -f "$predict_dest" ]] && \
+        assert_sha256 "$lm_dest" "$LM_SHA256" "$LM_FILENAME" && \
+        assert_sha256 "$predict_dest" "$LM_PREDICT_SHA256" "$LM_PREDICT_FILENAME"; then
+        note "LM already installed and verified (release ${MODEL_RELEASE})"
         ok "language model in place"
         return 0
-      fi
     fi
   fi
 
-  # --- 2. Migration: files exist and match the current LM release's digest?
+  # --- 2. Migration: files exist and match the pinned release digests?
   #        Then just (re)write the manifest — no 463MB re-download.
-  if [[ -z "$LM_FILE" && -f "$lm_dest" && -f "$predict_dest" && -n "$LM_RELEASE" ]]; then
-    local rd rp
-    rd=$(gh_release_digest "$LM_FILENAME" "$LM_RELEASE")
-    rp=$(gh_release_digest "$LM_PREDICT_FILENAME" "$LM_RELEASE")
-    if [[ -n "$rd" && \
-          "$rd" == "$(sha256sum "$lm_dest" | cut -d' ' -f1)" && \
-          "$rp" == "$(sha256sum "$predict_dest" | cut -d' ' -f1)" ]]; then
+  if [[ -z "$LM_FILE" && -f "$lm_dest" && -f "$predict_dest" ]]; then
+    if assert_sha256 "$lm_dest" "$LM_SHA256" "$LM_FILENAME" && \
+       assert_sha256 "$predict_dest" "$LM_PREDICT_SHA256" "$LM_PREDICT_FILENAME"; then
       commit_manifest_only=1
       LM_SOURCE="release"
-      note "existing LM matches release ${LM_RELEASE} — just updating the manifest"
-      ok "language model verified against release ${LM_RELEASE}"
+      note "existing LM matches release ${MODEL_RELEASE} — updating the manifest"
+      ok "language model verified against release ${MODEL_RELEASE}"
       return 0
     fi
   fi
 
-  # --- 3. Resolve a source: --lm-file / dist / pinned release download.
+  # --- 3. Resolve a source: --lm-file / dist / verified cache / public URL.
   if [[ -n "$LM_FILE" ]]; then
+    LM_RELEASE=""
     if [[ ! -f "$LM_FILE" ]]; then
       echo "macro-ime: LM file not found: $LM_FILE" >&2
       return 1
@@ -408,6 +476,7 @@ prepare_language_model() {
     check_lm_size "$LM_SRC" "$LM_FILENAME" || return 1
     note "using LM from: $LM_SRC (not verified against the release digest)"
   elif [[ -f "${SRC}/dist/${LM_FILENAME}" ]]; then
+    LM_RELEASE=""
     LM_SRC="${SRC}/dist/${LM_FILENAME}"
     LM_PREDICT_SRC="${SRC}/dist/${LM_PREDICT_FILENAME}"
     if [[ ! -f "$LM_PREDICT_SRC" ]]; then
@@ -419,11 +488,18 @@ prepare_language_model() {
     LM_SOURCE="dist"
     check_lm_size "$LM_SRC" "$LM_FILENAME" || return 1
     note "using LM from repo dist/ directory (not verified against the release digest)"
+  elif [[ -f "$cache_lm" && -f "$cache_predict" ]] && \
+       assert_sha256 "$cache_lm" "$LM_SHA256" "$LM_FILENAME" && \
+       assert_sha256 "$cache_predict" "$LM_PREDICT_SHA256" "$LM_PREDICT_FILENAME"; then
+    LM_SRC="$cache_lm"
+    LM_PREDICT_SRC="$cache_predict"
+    LM_SOURCE="release"
+    note "using verified public-release cache (${MODEL_RELEASE})"
   else
     if (( OFFLINE )); then
       if [[ -f "$lm_dest" ]]; then
         echo "macro-ime: LM files exist locally but are not verified" >&2
-        echo "  (missing/mismatched ${MANIFEST}, and --offline cannot resolve the release)." >&2
+        echo "  (they do not match the pinned ${MODEL_RELEASE} digests)." >&2
         echo "  Re-run online once to verify, or delete the old files to reinstall:" >&2
         echo "    rm -f ${MACRO_IME_LM_DIR}/${LM_FILENAME} ${MACRO_IME_LM_DIR}/${LM_PREDICT_FILENAME}" >&2
       else
@@ -432,45 +508,10 @@ prepare_language_model() {
       fi
       return 1
     fi
-    if ! command -v gh >/dev/null; then
-      echo "macro-ime: 'gh' CLI is required to download the language model from the" >&2
-      echo "  private release. Run 'gh auth login' first, or use --lm-file <path>." >&2
-      return 1
-    fi
-    if [[ -z "$LM_RELEASE" ]]; then
-      echo "macro-ime: cannot resolve a release that carries ${LM_FILENAME}." >&2
-      echo "  Upload the model to a release, or use --lm-file <path>." >&2
-      return 1
-    fi
-    LM_DL_DIR=$(mktemp -d)
-    note "downloading language model from release ${LM_RELEASE} (~463MB)…"
-    gh release download "$LM_RELEASE" --repo "$GH_REPO" \
-      --pattern "$LM_FILENAME" --pattern "$LM_PREDICT_FILENAME" --dir "$LM_DL_DIR" \
-      2>/dev/null || {
-      echo "macro-ime: download from ${LM_RELEASE} failed." >&2
-      echo "  Check the release exists + your gh auth, or use --lm-file." >&2
-      rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1
-    }
-    LM_SRC="${LM_DL_DIR}/${LM_FILENAME}"
-    LM_PREDICT_SRC="${LM_DL_DIR}/${LM_PREDICT_FILENAME}"
-    if [[ ! -f "$LM_SRC" ]]; then
-      echo "macro-ime: LM file missing after download" >&2
-      rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1
-    fi
+    note "downloading public language model ${MODEL_RELEASE} (~463MB)…"
+    LM_SRC=$(download_public_asset "$LM_FILENAME" "$LM_SHA256")
+    LM_PREDICT_SRC=$(download_public_asset "$LM_PREDICT_FILENAME" "$LM_PREDICT_SHA256")
     LM_SOURCE="release"
-    # Fail-closed verification against the release's recorded sha256.
-    local exp_lm exp_pred
-    exp_lm=$(gh_release_digest "$LM_FILENAME" "$LM_RELEASE")
-    exp_pred=$(gh_release_digest "$LM_PREDICT_FILENAME" "$LM_RELEASE")
-    assert_sha256 "$LM_SRC" "$exp_lm" "$LM_FILENAME" \
-      || { rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1; }
-    if [[ -f "$LM_PREDICT_SRC" ]]; then
-      assert_sha256 "$LM_PREDICT_SRC" "$exp_pred" "$LM_PREDICT_FILENAME" \
-        || { rm -rf "$LM_DL_DIR"; LM_DL_DIR=""; return 1; }
-    else
-      note "warning: ${LM_PREDICT_FILENAME} not present in the release — skipping"
-      LM_PREDICT_SRC=""
-    fi
   fi
 
   ok "language model ready (source: ${LM_SOURCE})"
@@ -491,6 +532,8 @@ commit_language_model() {
   cp "$LM_SRC" "$lm_dest"
   if [[ -n "$LM_PREDICT_SRC" ]]; then
     cp "$LM_PREDICT_SRC" "$predict_dest"
+  else
+    rm -f "$predict_dest"
   fi
   write_manifest "$lm_dest" "$predict_dest"
   note "language model installed ($(du -h "$lm_dest" | cut -f1))"
@@ -525,37 +568,10 @@ install_addon() {
   backup_file_once "$STATE_ADDON_CONF" state-addon.conf
   backup_file_once "$FCITX_DROPIN" fcitx-dropin.conf
 
-  # ABI preflight: the pre-built .so must resolve against this machine's
-  # fcitx5. On failure fall back to compiling from source.
-  local so="${SRC}/dist/libmacro-ime-state.so"
-  if [[ -f "$so" ]]; then
-    local bad
-    bad=$(ldd -r "$so" 2>&1 | grep -E "not found|undefined symbol" || true)
-    if [[ -n "$bad" ]]; then
-      note "pre-built addon has unresolved ABI on this machine:"
-      while IFS= read -r l; do note "  $l"; done <<<"$bad"
-      if command -v cmake >/dev/null; then
-        note "building from source instead (local fcitx5 ABI)"
-        build_state_addon_to "$addon_dest"
-        ok "event addon built from source"
-      else
-        echo "macro-ime: pre-built addon ABI mismatch and no build toolchain." >&2
-        echo "  Install cmake + Fcitx5Core headers, or use an Omarchy release" >&2
-        echo "  that matches this fcitx5." >&2
-        return 1
-      fi
-    else
-      install -m 0755 "$so" "$addon_dest"
-      note "installed pre-built addon (ABI ok)"
-    fi
-  else
-    if ! command -v cmake >/dev/null; then
-      echo "macro-ime: no pre-built addon in dist/ and cmake not available." >&2
-      echo "  Build it: cmake -S engine/macro-ime-state -B build && cmake --build build" >&2
-      return 1
-    fi
-    build_state_addon_to "$addon_dest"
-  fi
+  # prepare_addon_artifact completed the ABI check before any user config was
+  # touched. End-user installs never need a compiler.
+  install -m 0755 "$ADDON_SRC" "$addon_dest"
+  note "installed verified addon"
 
   # Register the addon. NOTE: fcitx5 resolves the library as name + ".so" and
   # does NOT prepend "lib", so Library= must be the exact .so name minus ".so".
@@ -727,11 +743,16 @@ apply_and_activate() {
 [[ ${1:-} == "--undo" ]] && { undo; exit 0; }
 
 require_commands
+load_version
+preflight_platform
+if ! prepare_addon_artifact; then
+  [[ -n "$ADDON_BUILD_DIR" ]] && rm -rf "$ADDON_BUILD_DIR"
+  exit 1
+fi
 
 # Backup dir is the undo contract; it must exist before any backup_file_once.
 mkdir -p "$BACKUP_DIR"
 
-load_version
 trap 'on_error $LINENO' ERR
 
 echo "macro-ime: installing Omarchy-native Chinese IME experience (release ${RELEASE_TAG})"
@@ -753,8 +774,8 @@ apply_and_activate
 # Manifest summary for the final report.
 LM_MANIFEST_REL=$(jq -r '.release // ""' "$MANIFEST" 2>/dev/null || true)
 
-# Clean up the temp download dir (kept alive through the commit phase).
-[[ -n "$LM_DL_DIR" ]] && rm -rf "$LM_DL_DIR"
+# Clean up temporary addon staging; verified model downloads stay cached.
+[[ -n "$ADDON_BUILD_DIR" ]] && rm -rf "$ADDON_BUILD_DIR"
 
 echo
 echo "Macro IME installed (release ${RELEASE_TAG}):"
